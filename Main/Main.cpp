@@ -3,21 +3,42 @@
 #include <Windows.h>
 #include <stdio.h>
 
+#define internal_function static
+#define local_persist static
+#define global_variable static
+
+//global var (for now)
+global_variable bool Running;
+
+internal_function void ResizeDIBSection(int Width, int Height) {
+	HBITMAP CreateDIBSection();
+}
+
+internal_function void UpdateWindow(HWND Window, int X, int Y, int Width, int Height) {
+	int StrechDIBBits();
+}
+
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 	LRESULT Result = 0;
 
 	switch (Message) {
 		case WM_SIZE: {
+			RECT ClientRect; 
+			GetClientRect(Window, &ClientRect);
+			int Height = ClientRect.bottom - ClientRect.top;
+			int Width = ClientRect.right - ClientRect.left;
+			ResizeDIBSection(Width, Height);
 			printf("size\n");
 		} break;
 
 		case WM_DESTROY: {
+			Running = false;
 			printf("destroy\n");
 		} break;
 
 		case WM_CLOSE: {
+			Running = false;
 			printf("close\n");
-			PostQuitMessage(0);
 		} break;
 
 		case WM_ACTIVATEAPP: {
@@ -31,9 +52,9 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 			int Y = Paint.rcPaint.top;
 			int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
 			int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-			PatBlt(Context, X, Y, Width, Height, WHITENESS);
+			UpdateWindow(Window, X, Y, Width, Height);
 			EndPaint(Window, &Paint);
-
+			
 		} break;
 
 		default: {
@@ -67,7 +88,9 @@ int main() {
 	}
 	
 	MSG Message;
-	for (;;) {
+	Running = true;
+
+	while(Running) {
 		BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
 		if (MessageResult <= 0) {
 			break;
