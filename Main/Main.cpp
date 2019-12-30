@@ -7,15 +7,41 @@
 #define local_persist static
 #define global_variable static
 
-//global var (for now)
+//global var (for now) 
+//TODO:
 global_variable bool Running;
 
+global_variable BITMAPINFO BitmapInfo;
+global_variable void *BitmapMemory;
+global_variable HBITMAP BitmapHandle;
+global_variable HDC BitmapContext;
+
 internal_function void ResizeDIBSection(int Width, int Height) {
-	HBITMAP CreateDIBSection();
+	
+	//TODO: free DIBSection
+
+	if (BitmapHandle) {
+		DeleteObject(BitmapHandle);
+	} 
+
+	if(!BitmapContext){
+		//TODO: change? -> new Monitor with another resolution
+		BitmapContext = CreateCompatibleDC(0);
+	}
+	
+	BITMAPINFO BitmapInfo;
+	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
+	BitmapInfo.bmiHeader.biWidth = Width;
+	BitmapInfo.bmiHeader.biHeight = Height;
+	BitmapInfo.bmiHeader.biPlanes = 1;
+	BitmapInfo.bmiHeader.biBitCount = 64;
+	BitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+	HBITMAP BitmapHandle = CreateDIBSection(BitmapContext, &BitmapInfo, DIB_RGB_COLORS, &BitmapMemory, 0, 0);
 }
 
-internal_function void UpdateWindow(HWND Window, int X, int Y, int Width, int Height) {
-	int StrechDIBBits();
+internal_function void UpdateWindow(HDC Context, int X, int Y, int Width, int Height) {
+	StretchDIBits(Context, X, Y, Width, Height, X, Y, Width, Height, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -52,7 +78,7 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 			int Y = Paint.rcPaint.top;
 			int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
 			int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-			UpdateWindow(Window, X, Y, Width, Height);
+			UpdateWindow(Context, X, Y, Width, Height);
 			EndPaint(Window, &Paint);
 			
 		} break;
@@ -99,7 +125,6 @@ int main() {
 		DispatchMessage(&Message);
 
 	}
-
 
 	return 0;
 }
