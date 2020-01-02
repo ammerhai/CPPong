@@ -13,20 +13,13 @@ global_variable bool Running;
 
 global_variable BITMAPINFO BitmapInfo;
 global_variable void *BitmapMemory;
-global_variable HBITMAP BitmapHandle;
-global_variable HDC BitmapContext;
+
 
 internal_function void ResizeDIBSection(int Width, int Height) {
 	
 	//TODO: free DIBSection
-
-	if (BitmapHandle) {
-		DeleteObject(BitmapHandle);
-	} 
-
-	if(!BitmapContext){
-		//TODO: change? -> new Monitor with another resolution
-		BitmapContext = CreateCompatibleDC(0);
+	if (BitmapMemory) {
+		VirtualFree(BitmapMemory, 0, MEM_RELEASE);
 	}
 	
 	BITMAPINFO BitmapInfo;
@@ -37,7 +30,9 @@ internal_function void ResizeDIBSection(int Width, int Height) {
 	BitmapInfo.bmiHeader.biBitCount = 64;
 	BitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-	HBITMAP BitmapHandle = CreateDIBSection(BitmapContext, &BitmapInfo, DIB_RGB_COLORS, &BitmapMemory, 0, 0);
+	int BytesPerPixel = 4;
+	int BitmapMemorySize = (Width * Height) * BytesPerPixel;
+	BitmapMemory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 }
 
 internal_function void UpdateWindow(HDC Context, int X, int Y, int Width, int Height) {
