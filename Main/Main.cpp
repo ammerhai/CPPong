@@ -2,10 +2,21 @@
 //
 #include <Windows.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define internal_function static
 #define local_persist static
 #define global_variable static
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
+typedef int8_t int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
 
 //global var (for now) 
 //TODO:
@@ -13,6 +24,45 @@ global_variable bool Running;
 
 global_variable BITMAPINFO BitmapInfo;
 global_variable void *BitmapMemory;
+global_variable int BitmapWidth;
+global_variable int BitmapHeight;
+global_variable int BytesPerPixel = 4;
+
+internal_function void RenderGradient(int XOffset, int YOffset) {
+
+	int Width = BitmapWidth;
+	int Height = BitmapHeight;
+	int Pitch = Width * BytesPerPixel;
+	uint8 *Row = (uint8 *)BitmapMemory;
+
+	for (int Y = 0; Y < BitmapHeight; Y++) {
+		uint8 *Pixel = (uint8 *)Row;
+
+		for (int X = 0; X < BitmapWidth; X++) {
+			/*
+									Pixel+0 Pixel+1 Pixel+2 Pixel+3
+				Pixel in Memory:	00 00 00 00
+									BB GG RR xx
+								->  0x xxRRGGBB
+			*/
+
+			*Pixel = (uint8)(X + XOffset);
+			Pixel++;
+
+			*Pixel = (uint8)(Y + YOffset);
+			Pixel++;
+
+			*Pixel = 0;
+			Pixel++;
+
+			*Pixel = 0;
+			Pixel++;
+
+		}
+
+		Row += Pitch;
+	}
+}
 
 
 internal_function void ResizeDIBSection(int Width, int Height) {
@@ -21,22 +71,30 @@ internal_function void ResizeDIBSection(int Width, int Height) {
 	if (BitmapMemory) {
 		VirtualFree(BitmapMemory, 0, MEM_RELEASE);
 	}
+
+	BitmapWidth = Width;
+	BitmapHeight = Height;
 	
 	BITMAPINFO BitmapInfo;
 	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-	BitmapInfo.bmiHeader.biWidth = Width;
-	BitmapInfo.bmiHeader.biHeight = Height;
+	BitmapInfo.bmiHeader.biWidth = BitmapWidth;
+	BitmapInfo.bmiHeader.biHeight = -BitmapHeight;
 	BitmapInfo.bmiHeader.biPlanes = 1;
-	BitmapInfo.bmiHeader.biBitCount = 64;
+	BitmapInfo.bmiHeader.biBitCount = 32;
 	BitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-	int BytesPerPixel = 4;
-	int BitmapMemorySize = (Width * Height) * BytesPerPixel;
+	//int BytesPerPixel = 4;
+	int BitmapMemorySize = (BitmapWidth * BitmapHeight) * BytesPerPixel;
 	BitmapMemory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+
+	RenderGradient(128, 128);
 }
 
-internal_function void UpdateWindow(HDC Context, int X, int Y, int Width, int Height) {
-	StretchDIBits(Context, X, Y, Width, Height, X, Y, Width, Height, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+internal_function void Win32UpdateWindow(HDC Context, RECT *WindowRect, int X, int Y, int Width, int Height) {
+
+	int WindowWidth = WindowRect->right - WindowRect->left ;
+	int WindowHeight = WindowRect ->bottom - WindowRect->top;
+	StretchDIBits(Context, /*X, Y, Width, Height, X, Y, Width, Height, */ 0, 0, BitmapWidth, BitmapHeight, 0, 0, WindowWidth, WindowHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -73,7 +131,10 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 			int Y = Paint.rcPaint.top;
 			int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
 			int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-			UpdateWindow(Context, X, Y, Width, Height);
+
+			RECT ClientRect;
+			GetClientRect(Window, &ClientRect);
+			Win32UpdateWindow(Context, &ClientRect, X, Y, Width, Height);
 			EndPaint(Window, &Paint);
 			
 		} break;
