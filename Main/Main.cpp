@@ -1,8 +1,10 @@
 // Main.cpp : Diese Datei enthält die Funktion "main". Hier beginnt und endet die Ausführung des Programms.
 //
+#include "math_graphics.h"
 #include <Windows.h>
 #include <stdio.h>
 #include <stdint.h>
+#include "create_window.h"
 
 #define internal_function static
 #define local_persist static
@@ -28,6 +30,15 @@ global_variable int BitmapWidth;
 global_variable int BitmapHeight;
 global_variable int BytesPerPixel = 4;
 
+struct PixelColor {
+	uint8 b;
+	uint8 g;
+	uint8 r;
+	uint8 a;
+};
+
+
+//function to learn rendering
 internal_function void RenderGradient(int XOffset, int YOffset) {
 
 	int Width = BitmapWidth;
@@ -36,7 +47,7 @@ internal_function void RenderGradient(int XOffset, int YOffset) {
 	uint8 *Row = (uint8 *)BitmapMemory;
 
 	for (int Y = 0; Y < BitmapHeight; Y++) {
-		uint8 *Pixel = (uint8 *)Row;
+		PixelColor *pixel = (PixelColor *)Row;
 
 		for (int X = 0; X < BitmapWidth; X++) {
 			/*
@@ -46,28 +57,29 @@ internal_function void RenderGradient(int XOffset, int YOffset) {
 								->  0x xxRRGGBB
 			*/
 
-			*Pixel = (uint8)(X + XOffset) ^ (uint8)(Y + YOffset);
-			Pixel++;
+			pixel->b = (uint8)(X + XOffset) ^ (uint8)(Y + YOffset);
+			pixel->g = (uint8)(Y + YOffset);
+			pixel->r = 0.5 * ((uint8)(Y + YOffset) + (uint8)(X + XOffset));
 
-			*Pixel = (uint8)(Y + YOffset);
-			Pixel++;
-
-			*Pixel = (uint8)(Y + YOffset) + ((uint8)(X + XOffset));
-			Pixel++;
-
-			*Pixel = 0xFF;
-			Pixel++;
-
+			pixel->a = 0xFF;
+			pixel++;
 		}
 
 		Row += Pitch;
 	}
 }
 
+void renderQuad(V2 Position, V2 Size) {
+	V2 pos = -Position;
+}
+
+void RenderPong() {
+
+}
+
 
 internal_function void ResizeDIBSection(int Width, int Height) {
 	
-	//TODO: free DIBSection
 	if (BitmapMemory) {
 		VirtualFree(BitmapMemory, 0, MEM_RELEASE);
 	}
@@ -86,14 +98,16 @@ internal_function void ResizeDIBSection(int Width, int Height) {
 	int BitmapMemorySize = (BitmapWidth * BitmapHeight) * BytesPerPixel;
 	BitmapMemory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 
-	//RenderGradient(128, 128);
+	RenderGradient(128, 128);
 }
 
-internal_function void Win32UpdateWindow(HDC Context, RECT *ClientRect, int X, int Y, int Width, int Height) {
+internal_function void Win32UpdateWindow(HDC Context, HWND Window, int X, int Y) {
 
-	int WindowWidth = ClientRect->right - ClientRect->left ;
-	int WindowHeight = ClientRect ->bottom - ClientRect->top;
-	StretchDIBits(Context, /*X, Y, Width, Height, X, Y, Width, Height, */ 0, 0, WindowWidth, WindowHeight, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+	RECT ClientRect;
+	GetClientRect(Window, &ClientRect);
+	int WindowWidth = ClientRect.right - ClientRect.left ;
+	int WindowHeight = ClientRect.bottom - ClientRect.top;
+	StretchDIBits(Context, 0, 0, WindowWidth, WindowHeight, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -125,6 +139,10 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 
 		case WM_PAINT: {
 			PAINTSTRUCT Paint;
+			BeginPaint(Window, &Paint);
+			EndPaint(Window, &Paint);
+
+			/*PAINTSTRUCT Paint;
 			HDC Context = BeginPaint(Window, &Paint);
 			int X = Paint.rcPaint.left;
 			int Y = Paint.rcPaint.top;
@@ -134,7 +152,7 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 			RECT ClientRect;
 			GetClientRect(Window, &ClientRect);
 			Win32UpdateWindow(Context, &ClientRect, X, Y, Width, Height);
-			EndPaint(Window, &Paint);
+			EndPaint(Window, &Paint);*/
 			
 		} break;
 
@@ -147,22 +165,17 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 }
 
 
+
 int main() {
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
-	WNDCLASS WindowClass = {};
-	
-	WindowClass.style = CS_OWNDC | CS_VREDRAW | CS_HREDRAW;
-	WindowClass.lpfnWndProc = WindowMsgs;
-	WindowClass.hInstance = GetModuleHandle(0);
-	WindowClass.lpszClassName = "PongWindowClass";
-	
-	if (!RegisterClass(&WindowClass)) {
-		printf("RegisterClass failed!\n");
-		return 1;
-	}
 
-	HWND Window = CreateWindowEx(0, WindowClass.lpszClassName, "PONG", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, WindowClass.hInstance, 0 );
+	V2 a = V2{ 0.5, 0.5 };
+	V2 b = V2{ 1, 2 };
+	float d = 3;
 
+	auto c = b * d;
+
+	auto Window = (HWND)create_window(WindowMsgs);
 	if (!Window) {
 		printf("CreateWindow failed!\n");
 		return 1;
@@ -174,6 +187,8 @@ int main() {
 	int XOffset = 0;
 	int YOffset = 0;
 	
+	HDC Context = GetDC(Window);
+
 	while(Running) {
 
 		MSG Message;
@@ -189,19 +204,10 @@ int main() {
 
 		RenderGradient(XOffset, YOffset);
 
-		
-		HDC Context = GetDC(Window) ;
-		RECT ClientRect;
-		GetClientRect(Window, &ClientRect);
-		int WindowWidth = ClientRect.right - ClientRect.left;
-		int WindowHeight = ClientRect.bottom - ClientRect.top;
-		Win32UpdateWindow(Context, &ClientRect, 0, 0, WindowWidth, WindowHeight);
-		ReleaseDC(Window, Context);
+		Win32UpdateWindow(Context, Window, 0, 0);
 		
 		XOffset++;
 	}
-
-
 
 	return 0;
 }
