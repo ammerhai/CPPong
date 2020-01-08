@@ -46,16 +46,16 @@ internal_function void RenderGradient(int XOffset, int YOffset) {
 								->  0x xxRRGGBB
 			*/
 
-			*Pixel = (uint8)(X + XOffset);
+			*Pixel = (uint8)(X + XOffset) ^ (uint8)(Y + YOffset);
 			Pixel++;
 
 			*Pixel = (uint8)(Y + YOffset);
 			Pixel++;
 
-			*Pixel = 0;
+			*Pixel = (uint8)(Y + YOffset) + ((uint8)(X + XOffset));
 			Pixel++;
 
-			*Pixel = 0;
+			*Pixel = 0xFF;
 			Pixel++;
 
 		}
@@ -74,8 +74,7 @@ internal_function void ResizeDIBSection(int Width, int Height) {
 
 	BitmapWidth = Width;
 	BitmapHeight = Height;
-	
-	BITMAPINFO BitmapInfo;
+
 	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
 	BitmapInfo.bmiHeader.biWidth = BitmapWidth;
 	BitmapInfo.bmiHeader.biHeight = -BitmapHeight;
@@ -87,14 +86,14 @@ internal_function void ResizeDIBSection(int Width, int Height) {
 	int BitmapMemorySize = (BitmapWidth * BitmapHeight) * BytesPerPixel;
 	BitmapMemory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 
-	RenderGradient(128, 128);
+	//RenderGradient(128, 128);
 }
 
-internal_function void Win32UpdateWindow(HDC Context, RECT *WindowRect, int X, int Y, int Width, int Height) {
+internal_function void Win32UpdateWindow(HDC Context, RECT *ClientRect, int X, int Y, int Width, int Height) {
 
-	int WindowWidth = WindowRect->right - WindowRect->left ;
-	int WindowHeight = WindowRect ->bottom - WindowRect->top;
-	StretchDIBits(Context, /*X, Y, Width, Height, X, Y, Width, Height, */ 0, 0, BitmapWidth, BitmapHeight, 0, 0, WindowWidth, WindowHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+	int WindowWidth = ClientRect->right - ClientRect->left ;
+	int WindowHeight = ClientRect ->bottom - ClientRect->top;
+	StretchDIBits(Context, /*X, Y, Width, Height, X, Y, Width, Height, */ 0, 0, WindowWidth, WindowHeight, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -162,9 +161,9 @@ int main() {
 		return 1;
 	}
 
-	HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "PONG", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, WindowClass.hInstance, 0 );
+	HWND Window = CreateWindowEx(0, WindowClass.lpszClassName, "PONG", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, WindowClass.hInstance, 0 );
 
-	if (!WindowHandle) {
+	if (!Window) {
 		printf("CreateWindow failed!\n");
 		return 1;
 	}
@@ -172,15 +171,37 @@ int main() {
 	MSG Message;
 	Running = true;
 
+	int XOffset = 0;
+	int YOffset = 0;
+	
 	while(Running) {
-		BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
-		if (MessageResult <= 0) {
-			break;
-		}
-		TranslateMessage(&Message);
-		DispatchMessage(&Message);
 
+		MSG Message;
+		
+		while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
+
+			if (Message.message == WM_QUIT) {
+				Running = false;
+			}
+			TranslateMessage(&Message);
+			DispatchMessage(&Message);
+		}
+
+		RenderGradient(XOffset, YOffset);
+
+		
+		HDC Context = GetDC(Window) ;
+		RECT ClientRect;
+		GetClientRect(Window, &ClientRect);
+		int WindowWidth = ClientRect.right - ClientRect.left;
+		int WindowHeight = ClientRect.bottom - ClientRect.top;
+		Win32UpdateWindow(Context, &ClientRect, 0, 0, WindowWidth, WindowHeight);
+		ReleaseDC(Window, Context);
+		
+		XOffset++;
 	}
+
+
 
 	return 0;
 }
