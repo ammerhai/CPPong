@@ -173,6 +173,10 @@ int main() {
 	float d = 3;
 
 	auto c = b / 1920.0;
+		
+	M2x2 e = M2x2{ 10, 5, 
+					4, 3 };
+	float f = e[2][0];
 
 	auto Window = (HWND)create_window(WindowMsgs);
 	if (!Window) {
