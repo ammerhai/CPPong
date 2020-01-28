@@ -4,6 +4,22 @@
 #include <stdint.h>
 #include <assert.h>
 
+//clamp
+float clamp(float min, float a, float max) {
+	float result = a;
+	if (a < min)
+		result = min;
+	if (a > max)
+		result = max;
+	return result;
+}
+
+//clamp für 0-1 Bereich (Grafik)
+float clamp01(float a) {
+	return clamp(0, a, 1);
+}
+
+
 //wurzelberechnung
 float square_root(float a) {
 	return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(a)));
@@ -11,6 +27,14 @@ float square_root(float a) {
 
 float reciprocal_square_root(float a) {
 	return _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(a)));
+}
+
+constexpr inline float min(float a, float b) {
+	return a < b ? a : b;
+}
+
+constexpr inline float max(float a, float b) {
+	return a > b ? a : b;
 }
 
 //-----------------------------------------------
@@ -140,6 +164,37 @@ inline V2 perp(V2 a) {
 		a.x
 	};
 }
+
+//clamp für 2-dim Vektor
+inline V2 clamp01(V2 a) {
+	return {
+		clamp01(a.x),
+		clamp01(a.y)
+	};
+}
+
+inline V2 min(V2 a, V2 b) {
+	return {
+		min(a.x, b.x),
+		min(a.y, b.y),
+	};
+}
+
+inline V2 max(V2 a, V2 b) {
+	return {
+		max(a.x, b.x),
+		max(a.y, b.y),
+	};
+}
+
+inline float min(V2 a) {
+	return min(a.x, a.y);
+}
+
+inline float max(V2 a) {
+	return max(a.x, a.y);
+}
+
 
 //-----------------------------------------------
 //Vektorberechnung 3-dim
@@ -373,7 +428,7 @@ inline M2x2 operator *(M2x2 a, M2x2 b) {
 }
 
 //Matrix * Vektor
-inline M2x2 operator *(M2x2 a, V2 b) {
+inline V2 operator *(M2x2 a, V2 b) {
 	return {
 		a[0][0] * b[0] + a[0][1] * b[1],
 		a[1][0] * b[0] + a[1][1] * b[1],
@@ -511,3 +566,5 @@ inline M3x3 identityM3x3() {
 		0.0f, 0.0f, 1.0f
 	};
 }
+
+//
