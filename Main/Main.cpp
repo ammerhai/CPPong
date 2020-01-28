@@ -168,6 +168,7 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 int main() {
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
 
+	//Mathheader tests
 	V2 a = V2{ 0.5, 0.5 };
 	V2 b = V2{ 1920, 1080 };
 	float d = 3;
@@ -176,7 +177,8 @@ int main() {
 		
 	M2x2 e = M2x2{ 10, 5, 
 					4, 3 };
-	float f = e[2][0];
+
+	float f = e[1][0];
 
 	auto Window = (HWND)create_window(WindowMsgs);
 	if (!Window) {
