@@ -5,7 +5,7 @@
 #include <assert.h>
 
 //clamp
-float clamp(float min, float a, float max) {
+constexpr inline float clamp(float min, float a, float max) {
 	float result = a;
 	if (a < min)
 		result = min;
@@ -15,17 +15,17 @@ float clamp(float min, float a, float max) {
 }
 
 //clamp für 0-1 Bereich (Grafik)
-float clamp01(float a) {
+constexpr inline float clamp01(float a) {
 	return clamp(0, a, 1);
 }
 
 
 //wurzelberechnung
-float square_root(float a) {
+inline float square_root(float a) {
 	return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(a)));
 }
 
-float reciprocal_square_root(float a) {
+inline float reciprocal_square_root(float a) {
 	return _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(a)));
 }
 
@@ -35,6 +35,23 @@ constexpr inline float min(float a, float b) {
 
 constexpr inline float max(float a, float b) {
 	return a > b ? a : b;
+}
+
+constexpr inline double min(double a, double b) {
+	return a < b ? a : b;
+}
+
+constexpr inline double max(double a, double b) {
+	return a > b ? a : b;
+}
+
+constexpr inline double min(size_t a, int b) {
+	return a < b ? a : b;
+}
+
+template<typename T>
+constexpr inline T min(T a, T b) {
+	return a < b ? a : b;
 }
 
 //-----------------------------------------------
@@ -349,6 +366,53 @@ inline float reciprocal_length(V3 a) {
 inline V3 normalize(V3 a) {
 	return a * reciprocal_length(a);
 }
+
+union V4 {
+	struct {
+		float x;
+		float y;
+		float z;
+		float w;
+	};
+
+	//farbvektor
+	struct {
+		float r;
+		float g;
+		float b;
+		float a;
+	};
+
+	//texturvektor
+	struct {
+		float u;
+		float v;
+		float s;
+		float t;
+	};
+
+	//von V3 zu V2 ohne z
+	struct {
+		V2 xy;
+		V2 zw;
+	};
+
+	//von V3 zu V2 ohne x
+	struct {
+		float _x;
+		V2 yz;
+		float _w;
+	};
+
+	struct {
+		float E[4];
+	};
+
+	float operator [](size_t index) {
+		assert(index < 4);
+		return  E[index];
+	}
+};
 
 
 //-----------------------------------------------

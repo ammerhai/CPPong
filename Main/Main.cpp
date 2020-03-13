@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 // Main.cpp : Diese Datei enthält die Funktion "main". Hier beginnt und endet die Ausführung des Programms.
 //
 #include "math_graphics.h"
@@ -7,6 +8,12 @@
 #include <math.h>
 #include "create_window.h"
 #include "time.h"
+#include <emmintrin.h>
+#include <immintrin.h>
+#include <dsound.h>
+#include <mmreg.h>
+#include "sb_string.h"
+#include "load_entire_file.h"
 
 #undef min
 #undef max
@@ -35,12 +42,182 @@ global_variable int BitmapWidth;
 global_variable int BitmapHeight;
 global_variable int BytesPerPixel = 4;
 
+
+#define log(format, ...) _log(__FUNCTION__, format, __VA_ARGS__)
+void _log(const char* function_name, const char* format, ...) {
+	printf("[%s] ", function_name);
+
+	va_list args;
+	va_start(args, format);
+	vprintf(format, args);
+	va_end(args);
+
+	printf("\n");
+}
+
+#define log_error(format, ...) _log_error(__FUNCTION__, format, __VA_ARGS__)
+void _log_error(const char* function_name, const char* format, ...) {
+	printf("[%s]ERROR: ", function_name);
+
+	va_list args;
+	va_start(args, format);
+	vprintf(format, args);
+	va_end(args);
+
+	printf("\n");
+}
+
+//Sound
+struct Sound_Effect {
+	int64 num_samples;
+	float* samples;
+};
+
+Sound_Effect load_sound_effect(const char* path) {
+	auto file = load_entire_file(path);
+	auto file_start = file;
+
+	if (!file.length) {
+		log_error("'%s' Datei konnte nicht geladen werden", path);
+		return { 0, 0 };
+	}
+
+	if (file.length < 36) {
+		log_error("'%s' Datei ist zu klein", path);
+		return { 0, 0 };
+	}
+
+	if (!starts_with(file, "RIFF")) {
+		log_error("'%s' Keine Wave Datei - 'RIFF' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		return { 0, 0 };
+	}
+	advance(file, 4);
+
+	advance(file, 4);
+
+	if (!starts_with(file, "WAVE")) {
+		log_error("'%s' Keine Wave Datei - 'WAVE' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		return { 0, 0 };
+	}
+	advance(file, 4);
+
+	if (!starts_with(file, "fmt ")) {
+		log_error("'%s' Keine Wave datei - 'fmt ' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		return { 0, 0 };
+	}
+	advance(file, 4);
+
+	if ((*(int32*)file.data) != 16) {
+		log_error("'%s' fmt Chunklength korrumpiert '16' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		return { 0, 0 };
+	}
+	advance(file, 4);
+
+	auto format = *(WAVEFORMATEX*)file.data;
+	advance(file, 16);
+
+	if (!starts_with(file, "data")) {
+		log_error("'%s' Keine Wave Datei - 'data' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		return { 0, 0 };
+	}
+	advance(file, 4);
+
+	auto data_length = *(int32*)file.data;
+	advance(file, 4);
+
+	if (!(format.nChannels == 1 || format.nChannels == 2)) {
+		log_error("'%s' Nicht unterstützte Channelanzahl, '1' oder '2' erwartet, '%hd' erhalten", path, format.nChannels);
+		return { 0, 0 };
+	}
+
+	if (format.wFormatTag != 1) {
+		log_error("'%s' Falscher Formattag, '1' erwartet, '%hd' erhalten (siehe Google)", path, format.wFormatTag);
+		return { 0, 0 };
+	}
+
+	if (format.nSamplesPerSec != 48000) {
+		log_error("'%s' Falsche SamplesProSekunde, '48000' erwartet, '%d' erhalten", path, format.nSamplesPerSec);
+		return { 0, 0 };
+	}
+
+	if (format.wBitsPerSample != 16) {
+		log_error("'%s' Falsche BitsProSample '16' erwartet, '%hd' erhalten", path, format.wBitsPerSample);
+		return { 0, 0 };
+	}
+
+	auto expected_block_align = format.wBitsPerSample / 8 * format.nChannels;
+
+	if (format.nBlockAlign != expected_block_align) {
+		log_error("'%s' Falscher BlockAlign '%d' erwartet, '%hd' erhalten", path, expected_block_align, format.nBlockAlign);
+		return { 0, 0 };
+	}
+
+	int64 num_samples = data_length / (format.wBitsPerSample / 8);
+	if (format.nChannels == 2)
+		num_samples /= 2;
+
+	float* samples = (float*)malloc(num_samples * sizeof(float) * 2);
+
+	if (!samples) {
+		log_error("'%s' malloc failed", path);
+		return { 0, 0 };
+	}
+
+	if (format.nChannels == 1) {
+		for (int i = 0; i < num_samples; i++) {
+			samples[i * 2 + 0] = (*(int16*)file.data) / 32767.0f;
+			samples[i * 2 + 1] = (*(int16*)file.data) / 32767.0f;
+			advance(file, 2);
+		}
+	} else {
+		for (int i = 0; i < num_samples; i++) {
+			samples[i * 2 + 0] = (*(int16*)file.data) / 32767.0f;
+			advance(file, 2);
+			samples[i * 2 + 1] = (*(int16*)file.data) / 32767.0f;
+			advance(file, 2);
+		}
+	}
+
+	free(file_start.data);
+	return { num_samples, samples };
+}
+
+
+Sound_Effect se_player_pong_1 = load_sound_effect("../Assets/Player_Pong_1.wav");
+Sound_Effect se_wall_pong_1 = load_sound_effect("../Assets/Wall_Pong_1.wav");
+Sound_Effect se_pong_game = load_sound_effect("../Assets/stereo_tests.wav");
+
+struct playing_sound {
+	Sound_Effect* sound_effect;
+	int64 current_sample;
+};
+
+
+#define concurrently_playable_sounds 16
+playing_sound currently_playing_sounds[concurrently_playable_sounds];
+
+void play_sound(Sound_Effect* sound_effect) {
+	for (int i = 0; i < concurrently_playable_sounds; i++) {
+		if (!currently_playing_sounds[i].sound_effect) {
+			currently_playing_sounds[i].sound_effect = sound_effect;
+			currently_playing_sounds[i].current_sample = 0;
+			return;
+		}
+	}
+
+	log_error("Keine weiteren Soundeffekte abspielbar");
+	return;
+}
+
+
 struct PixelColor {
 	uint8 b;
 	uint8 g;
 	uint8 r;
 	uint8 a;
 };
+
+
 
 //function to learn rendering
 internal_function void RenderGradient(int XOffset, int YOffset) {
@@ -77,19 +254,19 @@ internal_function void RenderGradient(int XOffset, int YOffset) {
 //Spieler 1 Attribute
 V2 p1_pos = { 0.1, 0.5 };
 V2 p1_size = {0.01, 0.07};
-V3 p1_color = { 0.9, 1, 0.5 };
+V4 p1_color = { 0.9, 1, 0.5 };
 int p1_points = 0;
 
 //Spieler 2 Attribute
 V2 p2_pos = { 0.9, 0.5 };
 V2 p2_size = { 0.01, 0.07 };
-V3 p2_color = { 0.5, 1, 0.9 };
+V4 p2_color = { 0.5, 1, 0.9 };
 int p2_points = 0;
 
 //Ball Attribute
 V2 ball_pos = { 0.5, 0.5 };
 V2 ball_size = { 0.01, 0.01 };
-V3 ball_color = {1, 0, 0};
+V4 ball_color = {1, 0, 0};
 float ball_speed = 0.5;
 V2 ball_direction = normalize(V2{-1, 0.9});
 
@@ -99,8 +276,14 @@ V2 border = { 0.01, 0.01 } ;
 bool key_down[256];
 double last_time = get_time();
 
+#define renderQuad_times_num 1024
+double renderQuad_times[renderQuad_times_num];
+size_t renderQuad_times_current;
+
 //Rendering der einzelnen Quadrate mit Farbgebung
-void renderQuad(V2 pos, V2 halfsize, V3 color) {
+void renderQuad(V2 pos, V2 halfsize, V4 color) {
+	//auto start_time = get_time();
+
 	V2 topleft = pos - halfsize;
 	V2 bottomright = pos + halfsize;
 
@@ -114,141 +297,115 @@ void renderQuad(V2 pos, V2 halfsize, V3 color) {
 
 	topleft = projection * topleft;
 	bottomright = projection * bottomright;
-	for (int y = topleft.y; y < bottomright.y; y++) {
-		for (int x = topleft.x; x < bottomright.x; x++) {
-			PixelColor* pixel = (PixelColor*)BitmapMemory + x + y * BitmapWidth;
-			pixel->b = 255 * color.b;
-			pixel->g = 255 * color.g;
-			pixel->r = 255 * color.r;
-			pixel->a = 0xFF;
+
+	auto topleft_x = (int)topleft.x;
+	auto topleft_y = (int)topleft.y;
+	auto bottomright_x = (int)bottomright.x;
+	auto bottomright_y = (int)bottomright.y;
+
+	int color_int = (((int)(color.a * 255.0f)) << 24) | (((int)(color.r * 255.0f)) << 16) | (((int)(color.g * 255.0f)) << 8) | (((int)(color.b * 255.0f)) << 0);
+	
+	auto color_4x = _mm_set_epi32(color_int, color_int, color_int, color_int);
+
+	for (int y = topleft_y; y < bottomright_y; y++) {
+		auto x_width = bottomright_x - topleft_x;
+		auto to_fill_4x = x_width / 4;
+		for (int x = 0; x < to_fill_4x; x++) {
+			_mm_storeu_si32((int*)BitmapMemory + topleft_x + x + y * BitmapWidth, color_4x);
 		}
+
+		for (int x = topleft_x + to_fill_4x; x < bottomright_x; x++) {
+			auto p = (int *)BitmapMemory + x + y * BitmapWidth;
+			*p = color_int;
+		}
+	}
+
+	/*auto end_time = get_time();
+	renderQuad_times[renderQuad_times_current] = end_time - start_time;
+	renderQuad_times_current = (renderQuad_times_current + 1) % renderQuad_times_num;
+	*/
+}
+
+
+struct Quad {
+	V2 pos;
+	V2 size;	
+};
+
+Quad numbers[10][5] = {
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } },
+	},
+	{
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } }
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ {0.23, 0.15 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.25 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } }
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.15 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.25 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } }
+	},
+	{
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.15 }, { 0.01, 0.05 } },
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.15 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.25 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } }
+	},
+	{
+		{ { 0.17, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.25 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } }
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } }
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } },
+		{ { 0.2, 0.3 }, { 0.04, 0.01 } }
+	},
+	{
+		{ { 0.2, 0.1 }, { 0.04, 0.01 } },
+		{ { 0.17, 0.15 }, { 0.01, 0.05 } },
+		{ { 0.2, 0.2 }, { 0.04, 0.01 } },
+		{ { 0.23, 0.2 }, { 0.01, 0.1 } }
+	},
+};
+
+
+void render_number(V2 off, int number) {
+	assert(number < 10);
+
+	for (int i = 0; i < 5; i++) {
+		auto quad = numbers[number][i];
+		renderQuad(quad.pos + off, quad.size, {1,1,1});
 	}
 }
 
 void render_point(int p1_points, int p2_points) {
-	//Punktanzeige für P1
-	switch (p1_points) {
-		case 0: printf("0\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 1: printf("1\n");
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-		case 2: printf("2\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 3: printf("3\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 4: printf("4\n");
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			break;
-		case 5: printf("5\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 6: printf("6\n");
-			renderQuad({ 0.77, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 7: printf("7\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-		case 8: printf("8\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 9: printf("9\n");
-			renderQuad({ 0.8, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.77, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.8, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.83, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-	}
-
-	//Punktanzeige für P2
-	switch (p2_points) {
-		case 0: printf("0:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 1: printf("1:");
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-		case 2: printf("2:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 3: printf("3:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 4: printf("4:");
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			break;
-		case 5: printf("5:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 6: printf("6:");
-			renderQuad({ 0.17, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.25 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 7: printf("7:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-		case 8: printf("8:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.3 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			break;
-		case 9: printf("9:");
-			renderQuad({ 0.2, 0.1 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.17, 0.15 }, { 0.01, 0.05 }, { 1, 1, 1 });
-			renderQuad({ 0.2, 0.2 }, { 0.04, 0.01 }, { 1, 1, 1 });
-			renderQuad({ 0.23, 0.2 }, { 0.01, 0.1 }, { 1, 1, 1 });
-			break;
-	}
+	render_number({}, p1_points);
+	render_number({.6}, p2_points);
 }
 
 
@@ -304,7 +461,7 @@ float Minkowski_intersects_ray(Minkowski_sum sum, V2 origin, V2 dir) {
 	return tmin;
 }
 
-V2 move_ball(V2 ball_pos, V2 &ball_direction, float distance_to_travel) {
+V2 move_ball(V2 ball_pos, V2& ball_direction, float distance_to_travel) {
 	if (distance_to_travel == 0)
 		return ball_pos;
 
@@ -319,7 +476,7 @@ V2 move_ball(V2 ball_pos, V2 &ball_direction, float distance_to_travel) {
 	float distance_p2 = clamp(0, Minkowski_intersects_ray(p2, ball_pos, ball_direction), INFINITY);
 
 	distance_top = distance_top == 0.0f ? INFINITY : distance_top;
-	distance_bottom = distance_bottom == 0.0f ? INFINITY : distance_bottom;	
+	distance_bottom = distance_bottom == 0.0f ? INFINITY : distance_bottom;
 	distance_p1 = distance_p1 == 0.0f ? INFINITY : distance_p1;
 	distance_p2 = distance_p2 == 0.0f ? INFINITY : distance_p2;
 
@@ -330,15 +487,22 @@ V2 move_ball(V2 ball_pos, V2 &ball_direction, float distance_to_travel) {
 
 	ball_pos = ball_pos + ball_direction * distance_min;
 
-	if (distance_min == distance_p1)
+	if (distance_min == distance_p1) {
 		ball_direction.x = fabs(ball_direction.x);
-	if (distance_min == distance_p2)
+		play_sound(&se_player_pong_1);
+	}
+	if (distance_min == distance_p2) {
 		ball_direction.x = -fabs(ball_direction.x);
-	if (distance_min == distance_top)
+		play_sound(&se_player_pong_1);
+	}
+	if (distance_min == distance_top) {
 		ball_direction.y = fabs(ball_direction.y);
-	if (distance_min == distance_bottom)
+		play_sound(&se_wall_pong_1);
+	}
+	if (distance_min == distance_bottom) {
 		ball_direction.y = -fabs(ball_direction.y);
-
+		play_sound(&se_wall_pong_1);
+	}
 	return move_ball(ball_pos, ball_direction, distance_to_travel - distance_min);
 }
 
@@ -377,14 +541,15 @@ void UpdatePong() {
 	ball_pos = move_ball(ball_pos, ball_direction, distance_traveled);
 
 	//Punkte
-	if (left(ball) < 0 && p1_points < 9) {
+	if (right(ball) > 1 && p1_points < 9) {
 		p1_points = p1_points + 1;
 		Reset_Ball();
 	}
-	if (right(ball) > 1 && p2_points < 9) {
+	if (left(ball) < 0 && p2_points < 9) {
 		p2_points = p2_points + 1;
 		Reset_Ball();
 	}
+
 
 	//Farbänderung, TODO: nach v1.0 -> Items, wird aktiviert
 	ball_color.r = sin(fmod(current_time, 6.28318530718));
@@ -506,8 +671,207 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 }
 
 
+
+void init_samples() {
+	play_sound(&se_pong_game);
+#if 0
+
+	float frequency = 220.0f;
+	size_t samples_per_wavelength = samples_per_second / frequency;
+
+	for (int i = 0; i < samples_to_play_num; i++) {
+		auto current_sample_in_wave = i % samples_per_wavelength;
+
+		if(current_sample_in_wave < samples_per_wavelength / 2)
+			samples_to_play[i] = (((float)current_sample_in_wave / (float)samples_per_wavelength) * 4.0f - 1.0f);
+		else
+			samples_to_play[i] = (1.0f - ((float)(current_sample_in_wave - samples_per_wavelength / 2) / (float)samples_per_wavelength) * 4.0f);
+	}
+#endif
+}
+
+int SoundThread(void* arg) {
+	init_samples();
+
+	typedef HRESULT direct_sound_create(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN  pUnkOuter);
+
+	HMODULE DSound = LoadLibraryA("dsound.dll");
+
+	if (!DSound) {
+		printf("LoadLibrary dsound.dll failed");
+		return 0;
+	}
+
+	direct_sound_create* DSoundCreate = (direct_sound_create* )GetProcAddress(DSound, "DirectSoundCreate");
+	if (!DSoundCreate) {
+		printf("GetProcAddress of DirectSoundCreate failed");
+		return 0;
+	}
+
+	//WICHTIG
+	LPDIRECTSOUND direct_sound;
+
+	if (DSoundCreate(0, &direct_sound, 0) != DS_OK) {
+		printf("DSoundCreate failed");
+		return 0;
+	}
+
+	if (direct_sound->SetCooperativeLevel(GetDesktopWindow(), DSSCL_PRIORITY) != DS_OK) {
+		printf("SetCooperationLevel failed");
+		return 0;
+	}
+
+	DSBUFFERDESC primary_buffer_description = {};
+	primary_buffer_description.dwSize = sizeof(DSBUFFERDESC);
+	primary_buffer_description.dwFlags = DSBCAPS_PRIMARYBUFFER;
+
+	LPDIRECTSOUNDBUFFER primary_buffer;
+
+	if (direct_sound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, 0) != DS_OK) {
+		printf("CreatePrimaryBuffer failed");
+		return 0;
+	}
+
+	WAVEFORMATEX format = {};
+	format.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+	format.nChannels = 2;
+	format.nSamplesPerSec = 48000;
+	format.wBitsPerSample = 32;
+	format.nBlockAlign = (format.nChannels * format.wBitsPerSample) / 8;
+	format.nAvgBytesPerSec = format.nBlockAlign * format.nSamplesPerSec;
+
+	auto bytes_per_sample = (format.wBitsPerSample / 8) * format.nChannels;
+
+	if (primary_buffer->SetFormat(&format) != DS_OK) {
+		printf("SetFormat failed");
+		return 0;
+	}
+
+	DSBUFFERDESC sound_buffer_description = {};
+	sound_buffer_description.dwSize = sizeof(DSBUFFERDESC);
+	sound_buffer_description.dwBufferBytes = (format.nSamplesPerSec / 20) * bytes_per_sample;
+	sound_buffer_description.dwFlags = DSBCAPS_GLOBALFOCUS;
+	sound_buffer_description.lpwfxFormat = &format;
+
+	LPDIRECTSOUNDBUFFER sound_buffer;
+
+	if (direct_sound->CreateSoundBuffer(&sound_buffer_description, &sound_buffer, 0) != DS_OK) {
+		printf("CreateSoundBuffer failed");
+		return 0;
+	}
+
+	if (sound_buffer->Play(0, 0, DSBPLAY_LOOPING) != DS_OK) {
+		printf("play sound_buffer failed");
+		return 0;
+	}
+
+	float* region_1 = 0;
+	DWORD region_1_size = 0;
+	float* region_2 = 0;
+	DWORD region_2_size = 0;
+
+	DWORD current_play_position;
+	DWORD current_write_position;
+
+	int64 last_written_sample = 0;
+	int64 samples_to_write = 0;
+
+	int64 buffer_samples = sound_buffer_description.dwBufferBytes / bytes_per_sample;
+
+	while (true) {
+		sound_buffer->GetCurrentPosition(&current_play_position, &current_write_position);
+
+		/*if (last_written_sample == current_play_position) {
+			Sleep(1);
+			continue;
+		}
+
+		if (last_written_sample < current_play_position)
+			samples_to_write = min((current_play_position - last_written_sample) / (bytes_per_sample * 1), (long long)(samples_to_play_num - current_sample));
+		else 
+			samples_to_write = min((current_play_position + sound_buffer_description.dwBufferBytes - last_written_sample) / (bytes_per_sample * 1), (long long)(samples_to_play_num - current_sample));
+
+		if(!SUCCEEDED(sound_buffer->Lock()*/
+
+
+		auto current_play_samples = current_play_position / bytes_per_sample;
+
+		if (current_play_samples >= last_written_sample)
+			samples_to_write = current_play_samples - last_written_sample;
+		else
+			samples_to_write = buffer_samples - last_written_sample + current_play_samples;
+
+		if (samples_to_write == 0)
+			continue;
+
+		last_written_sample = (last_written_sample + samples_to_write) % buffer_samples;
+
+		if (sound_buffer->Lock(last_written_sample * bytes_per_sample, samples_to_write * bytes_per_sample, (void**)&region_1, &region_1_size, (void **)&region_2, &region_2_size, 0) != DS_OK) {
+			printf("lock sound_buffer failed");
+			return 0;
+		}
+
+		auto region_1_samples = region_1_size / sizeof(float) / 2;
+		auto region_2_samples = region_2_size / sizeof(float) / 2;
+
+		for (int i = 0; i < region_1_samples; i++) {
+			float playing_sound_effects_left = 0;
+			float playing_sound_effects_right = 0;
+
+			for (int j = 0; j < concurrently_playable_sounds; j++) {
+				if (!currently_playing_sounds[j].sound_effect) 
+					continue;
+
+				if (!currently_playing_sounds[j].sound_effect->num_samples)
+					continue;
+
+				playing_sound_effects_left += currently_playing_sounds[j].sound_effect->samples[currently_playing_sounds[j].current_sample * 2 + 0];
+				playing_sound_effects_right += currently_playing_sounds[j].sound_effect->samples[currently_playing_sounds[j].current_sample * 2 + 1];
+				currently_playing_sounds[j].current_sample++;
+				if (currently_playing_sounds[j].current_sample == currently_playing_sounds[j].sound_effect->num_samples) {
+					currently_playing_sounds[j].sound_effect = 0;
+				}
+			}
+			region_1[i * 2 + 0] = playing_sound_effects_left;			
+			region_1[i * 2 + 1] = playing_sound_effects_right;
+		}
+
+		for (int i = 0; i < region_2_samples; i++) {
+			float playing_sound_effects_left = 0;
+			float playing_sound_effects_right = 0;
+
+			for (int j = 0; j < concurrently_playable_sounds; j++) {
+				if (!currently_playing_sounds[j].sound_effect)
+					continue;
+
+				if (!currently_playing_sounds[j].sound_effect->num_samples)
+					continue;
+
+				playing_sound_effects_left += currently_playing_sounds[j].sound_effect->samples[currently_playing_sounds[j].current_sample * 2 + 0];
+				playing_sound_effects_right += currently_playing_sounds[j].sound_effect->samples[currently_playing_sounds[j].current_sample * 2 + 1];
+				currently_playing_sounds[j].current_sample++;
+				if (currently_playing_sounds[j].current_sample == currently_playing_sounds[j].sound_effect->num_samples) {
+					currently_playing_sounds[j].sound_effect = 0;
+				}
+			}
+			region_2[i * 2 + 0] = playing_sound_effects_left;
+			region_2[i * 2 + 1] = playing_sound_effects_right;
+		}
+
+
+
+		if (sound_buffer->Unlock(region_1, region_1_size, region_2, region_2_size) != DS_OK) {
+			printf("unlock sound_buffer failed");
+			return 0;
+		}
+	}
+
+	return 0;
+}
+
 int main() {
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
+	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)&SoundThread, 0, 0, 0);
 
 	auto Window = (HWND)create_window(WindowMsgs);
 	if (!Window) {
@@ -539,6 +903,19 @@ int main() {
 		//RenderGradient(XOffset, YOffset);
 		RenderPong();
 
+		/*double min_time = INFINITY;
+		double max_time = 0.0;
+		double avg_time = 0.0;
+
+		if (renderQuad_times_current == 0) {
+			for (auto t : renderQuad_times) {
+				min_time = min(min_time, t * 1000.0);
+				max_time = max(max_time, t * 1000.0);
+				avg_time += (t * 1000.0) / (double)renderQuad_times_num;
+			}
+			printf("renderQuad_times: %f %f %f\n", min_time, avg_time, max_time);
+		}
+		*/
 		Win32UpdateWindow(Context, Window, 0, 0);
 		
 		XOffset++;

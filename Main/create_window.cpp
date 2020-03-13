@@ -1,8 +1,9 @@
-#include <Windows.h>
+#include "create_window.h"
+
 
 //create Window
 void* create_window(LRESULT (*WindowProc)(HWND, UINT, WPARAM, LPARAM)) {
-	WNDCLASSEXW window_class_struct = { 0 };
+	WNDCLASSEXW window_class_struct = {};
 	window_class_struct.cbSize = sizeof(WNDCLASSEXW);
 	window_class_struct.style = CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
 	window_class_struct.lpfnWndProc = WindowProc;
