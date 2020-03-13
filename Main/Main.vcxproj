@@ -157,13 +157,17 @@
   <ItemGroup>
     <ClCompile Include="create_window.cpp" />
     <ClCompile Include="load_entire_file.cpp" />
+    <ClCompile Include="log.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="pong_sound.cpp" />
     <ClCompile Include="time.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="create_window.h" />
     <ClInclude Include="load_entire_file.h" />
+    <ClInclude Include="log.h" />
     <ClInclude Include="math_graphics.h" />
+    <ClInclude Include="pong_sound.h" />
     <ClInclude Include="sb_string.h" />
     <ClInclude Include="time.h" />
   </ItemGroup>
