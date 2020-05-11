@@ -21,7 +21,7 @@ void* create_window(LRESULT (*WindowProc)(HWND, UINT, WPARAM, LPARAM)) {
 	if (!window_class)
 		return 0;
 
-	return CreateWindowExW(0, L"DX_WINDOW_CLASS", L"DX", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, GetModuleHandle(NULL), 0);
+	return CreateWindowExW(0, L"DX_WINDOW_CLASS", L"PONG", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, GetModuleHandle(NULL), 0);
 }
 
 /*WNDCLASS WindowClass = {};

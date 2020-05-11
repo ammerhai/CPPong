@@ -47,13 +47,13 @@
     <ClInclude Include="sb_string.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
-    <ClInclude Include="load_entire_file.h">
-      <Filter>Headerdateien</Filter>
-    </ClInclude>
     <ClInclude Include="pong_sound.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
     <ClInclude Include="log.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="load_entire_file.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
   </ItemGroup>

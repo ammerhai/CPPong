@@ -28,9 +28,12 @@ struct string {
 };
 
 inline bool operator==(string a, string b) {
-	if (a.length == b.length)
-		if (a.data == b.data)
-			return true;
+	if (a.length == b.length) {
+		for (int i = 0; i < a.length; i++)
+			if (a[i] != b[i])
+				return false;
+		return true;
+	}
 	return false;
 }
 
@@ -56,8 +59,8 @@ constexpr inline bool ends_with(string str, string end) {
 	return true;
 }
 
-constexpr inline void advance(string& str, size_t amount = 1) {
-	size_t to_advance = min(str.length, amount);
+constexpr inline void advance(string& str, int64_t amount = 1) {
+	int64_t to_advance = min(str.length, amount);
 	str.data += to_advance;
 	str.length -= to_advance;
 }

@@ -1,7 +1,9 @@
 #define _CRT_SECURE_NO_WARNINGS
+#define NOMINMAX
 // Main.cpp : Diese Datei enthält die Funktion "main". Hier beginnt und endet die Ausführung des Programms.
 //
 #include "math_graphics.h"
+#include <d3d11.h>
 #include <Windows.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -10,6 +12,7 @@
 #include "time.h"
 #include <emmintrin.h>
 #include <immintrin.h>
+#include <xmmintrin.h>
 #include <dsound.h>
 #include <mmreg.h>
 #include "sb_string.h"
@@ -44,28 +47,37 @@ global_variable int BitmapWidth;
 global_variable int BitmapHeight;
 global_variable int BytesPerPixel = 4;
 
+IDXGISwapChain* swap_chain;
+ID3D11Device* device;
+ID3D11DeviceContext* devicecontext;
+ID3D11DepthStencilState* depth_stencil_state;
+
+uint32 render_width = 1920;
+uint32 render_height = 1080;
+
 Sound_Effect se_player_pong_1 = load_sound_effect("../Assets/Player_Pong_1.wav");
 Sound_Effect se_wall_pong_1 = load_sound_effect("../Assets/Wall_Pong_1.wav");
+Sound_Effect se_wall_pong_2 = load_sound_effect("../Assets/Wall_Pong_2.wav");
 Sound_Effect se_pong_game = load_sound_effect("../Assets/pong_game.wav");
-
 
 //Spieler 1 Attribute
 V2 p1_pos = { 0.1, 0.5 };
 V2 p1_size = {0.01, 0.07};
-V4 p1_color = { 0.9, 1, 0.5 };
+V4 p1_color = { 0.9, 1, 0.5, 1 };
+//V4 p1_color = { 1, 0, 0, 1 };
 int p1_points = 0;
 
 //Spieler 2 Attribute
 V2 p2_pos = { 0.9, 0.5 };
 V2 p2_size = { 0.01, 0.07 };
-V4 p2_color = { 0.5, 1, 0.9 };
+V4 p2_color = { 0.5, 1, 0.9, 1 };
 int p2_points = 0;
 
 //Ball Attribute
 V2 ball_pos = { 0.5, 0.5 };
-V2 ball_size = { 0.01, 0.01 };
-V4 ball_color = {1, 0, 0};
-float ball_speed = 0.5;
+V2 ball_size = { 0.005, 0.005 };
+V4 ball_color = {1, 0, 0, 1};
+float ball_speed = 0.0;
 V2 ball_direction = normalize(V2{-1, 0.9});
 
 //Gameplay Attribute
@@ -78,7 +90,32 @@ double last_time = get_time();
 double renderQuad_times[renderQuad_times_num];
 size_t renderQuad_times_current;
 
+struct Pixel {
+	uint8_t red;
+	uint8_t green;
+	uint8_t blue;
+	uint8_t alpha;
+};
+
+#pragma pack 1
+struct back_buffer_Pixel {
+	uint8_t blue;
+	uint8_t green;
+	uint8_t red;
+	uint8_t alpha;
+};
+
 //Rendering der einzelnen Quadrate mit Farbgebung
+
+//TODO HARDWARE Rendering
+//TODO 92 - 95: Scaling
+
+auto blue_mask_4x  = _mm_set1_epi32(0xFF);
+auto green_mask_4x = _mm_set1_epi32(0xFF00);
+auto red_mask_4x   = _mm_set1_epi32(0xFF0000);
+
+auto new_mask_4x = _mm_set1_epi32(0xFF);
+
 void renderQuad(V2 pos, V2 halfsize, V4 color) {
 	//auto start_time = get_time();
 
@@ -101,28 +138,431 @@ void renderQuad(V2 pos, V2 halfsize, V4 color) {
 	auto bottomright_x = (int)bottomright.x;
 	auto bottomright_y = (int)bottomright.y;
 
-	int color_int = (((int)(color.a * 255.0f)) << 24) | (((int)(color.r * 255.0f)) << 16) | (((int)(color.g * 255.0f)) << 8) | (((int)(color.b * 255.0f)) << 0);
-	
-	auto color_4x = _mm_set_epi32(color_int, color_int, color_int, color_int);
+	auto back_buffer = (back_buffer_Pixel*)BitmapMemory;
+	auto y_height = bottomright_y - topleft_y;
 
-	for (int y = topleft_y; y < bottomright_y; y++) {
+	for (int y = 0; y < y_height; y++) {
 		auto x_width = bottomright_x - topleft_x;
-		auto to_fill_4x = x_width / 4;
-		for (int x = 0; x < to_fill_4x; x++) {
-			_mm_storeu_si32((int*)BitmapMemory + topleft_x + x + y * BitmapWidth, color_4x);
+		for (int x = 0; x < (x_width / 4) * 4; x += 4) {
+			auto old_colors = _mm_loadu_si128((__m128i *)&back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x]);
+
+			auto old_blue  = old_colors & blue_mask_4x;
+			auto old_green = old_colors & green_mask_4x;
+			auto old_red   = old_colors & red_mask_4x;
+
+			auto shift_green = old_green >> 8;
+			auto shift_red	 = old_red >> 16;
+
+			auto old_blue_f32  = _mm_cvtepi32_ps(old_blue);
+			auto old_green_f32 = _mm_cvtepi32_ps(shift_green);
+			auto old_red_f32   = _mm_cvtepi32_ps(shift_red);
+
+			old_blue_f32 = old_blue_f32 / 255.0f;
+			old_green_f32 = old_green_f32 / 255.0f;
+			old_red_f32   = old_red_f32 / 255.0f;
+
+			old_blue_f32  = old_blue_f32 * old_blue_f32;
+			old_green_f32 = old_green_f32 * old_green_f32;
+			old_red_f32   = old_red_f32 * old_red_f32;
+
+			auto colorb_4x = _mm_set1_ps(color.a * color.b);
+			auto colorg_4x = _mm_set1_ps(color.a * color.g);
+			auto colorr_4x = _mm_set1_ps(color.a * color.r);
+
+			auto new_blue  = lerp(old_blue_f32, color.a, color.b);
+			auto new_green = lerp(old_green_f32, color.a, color.g);
+			auto new_red   = lerp(old_red_f32, color.a, color.r);
+
+			new_blue  = square_root(new_blue);
+			new_green = square_root(new_green);
+			new_red   = square_root(new_red);
+
+			new_blue  = new_blue * 255.0f;
+			new_green = new_green * 255.0f;
+			new_red   = new_red * 255.0f;
+
+			auto new_blue_int  = _mm_cvtps_epi32(new_blue);
+			auto new_green_int = _mm_cvtps_epi32(new_green);
+			auto new_red_int   = _mm_cvtps_epi32(new_red);
+			
+			new_blue_int  = new_blue_int & new_mask_4x;
+			new_green_int = new_green_int & new_mask_4x;
+			new_red_int   = new_red_int & new_mask_4x;
+
+			shift_green = new_green_int << 8;
+			shift_red   = new_red_int << 16;
+
+			auto new_colors = new_blue_int | shift_green | shift_red;
+			_mm_storeu_si128((__m128i *)&back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x], new_colors);
 		}
 
-		for (int x = topleft_x + to_fill_4x; x < bottomright_x; x++) {
-			auto p = (int *)BitmapMemory + x + y * BitmapWidth;
-			*p = color_int;
+		for (int _x = 0; _x < x_width % 4; _x++) {
+			auto x = (x_width / 4) * 4 + _x;
+
+			auto old_red = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].red;
+			auto old_green = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].green;
+			auto old_blue = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].blue;
+
+			auto old_red_f32 = old_red / 255.0f;
+			auto old_green_f32 = old_green / 255.0f;
+			auto old_blue_f32 = old_blue / 255.0f;
+
+			//sRGB -> RGB
+			old_red_f32 = old_red_f32 * old_red_f32;
+			old_green_f32 = old_green_f32 * old_green_f32;
+			old_blue_f32 = old_blue_f32 * old_blue_f32;
+
+			auto new_red = lerp(old_red_f32, color.a, color.r);
+			auto new_green = lerp(old_green_f32, color.a, color.g);
+			auto new_blue = lerp(old_blue_f32, color.a, color.b);
+
+			new_red = square_root(new_red);
+			new_green = square_root(new_green);
+			new_blue = square_root(new_blue);
+
+			new_red = new_red * 255.0f;
+			new_green = new_green * 255.0f;
+			new_blue = new_blue * 255.0f;
+
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].red = new_red;
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].green = new_green;
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].blue = new_blue;
 		}
 	}
+
 
 	/*auto end_time = get_time();
 	renderQuad_times[renderQuad_times_current] = end_time - start_time;
 	renderQuad_times_current = (renderQuad_times_current + 1) % renderQuad_times_num;
 	*/
 }
+
+void renderQuad_old(V2 pos, V2 halfsize, V4 color) {
+	//auto start_time = get_time();
+
+	V2 topleft = pos - halfsize;
+	V2 bottomright = pos + halfsize;
+
+	topleft = clamp01(topleft);
+	bottomright = clamp01(bottomright);
+
+	M2x2 projection = {
+		(float)BitmapWidth, 0.0f,
+		0.0f, (float)BitmapHeight
+	};
+
+	topleft = projection * topleft;
+	bottomright = projection * bottomright;
+
+	auto topleft_x = (int)topleft.x;
+	auto topleft_y = (int)topleft.y;
+	auto bottomright_x = (int)bottomright.x;
+	auto bottomright_y = (int)bottomright.y;
+
+	auto back_buffer = (back_buffer_Pixel *)BitmapMemory;
+	auto y_height = bottomright_y - topleft_y ;	
+
+	for (int y = 0; y < y_height; y++) {
+		auto x_width = bottomright_x - topleft_x;
+		for (int x = 0; x < x_width; x++) {
+			auto old_red = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].red;
+			auto old_green = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].green;
+			auto old_blue = back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].blue;
+
+			auto old_red_f32 = old_red / 255.0f;
+			auto old_green_f32 = old_green / 255.0f;
+			auto old_blue_f32 = old_blue / 255.0f;
+
+			//sRGB -> RGB
+			old_red_f32 = old_red_f32 * old_red_f32;
+			old_green_f32 = old_green_f32 * old_green_f32;
+			old_blue_f32 = old_blue_f32 * old_blue_f32;
+
+			auto new_red = lerp(old_red_f32, color.a, color.r);
+			auto new_green = lerp(old_green_f32, color.a, color.g);
+			auto new_blue = lerp(old_blue_f32, color.a, color.b);
+
+			new_red = square_root(new_red);
+			new_green = square_root(new_green);
+			new_blue = square_root(new_blue);
+
+			new_red = new_red * 255.0f;
+			new_green = new_green * 255.0f;
+			new_blue = new_blue * 255.0f;
+
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].red = new_red;
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].green = new_green;
+			back_buffer[(topleft_y + y) * BitmapWidth + topleft_x + x].blue = new_blue;
+		}
+	}
+
+
+	/*auto end_time = get_time();
+	renderQuad_times[renderQuad_times_current] = end_time - start_time;
+	renderQuad_times_current = (renderQuad_times_current + 1) % renderQuad_times_num;
+	*/
+}
+
+struct BMP_Texture {
+	int64 bmp_width;
+	int64 bmp_height;
+	uint32* pixel;
+};
+
+#define print_value(v) _Generic((v), \
+	int8_t: printf("%hhd", v), \
+	int16_t: printf("%hd", v), \
+	int32_t: printf("%d", v),  \
+	int64_t: printf("%lld", v), \
+	long: printf("%lld", v), \
+	\
+	uint8_t: printf("%hhu", v), \
+	uint16_t: printf("%hu", v), \
+	uint32_t: printf("%u", v),  \
+	uint64_t: printf("%llu", v), \
+	unsigned long: printf("%llu", v) \
+)
+
+template <typename T>
+T read(string &file){
+	if(file.length < sizeof(T))
+		return {};
+	T value = *(T*)file.data;
+	advance(file, sizeof(T));
+	return value;
+}
+
+bool _expect_read(string& file, string expected_value, const char* path, const char* error_msg) {
+	if (file.length < expected_value.length)
+		return false;
+	if (!(string{ expected_value.length, file.data } == expected_value)) {
+		log_error("'%s' %s expected '%.*s' got '%.*s'\n", path, error_msg, expected_value.length, expected_value.data, expected_value.length, file.data);
+		return false;
+	}
+	advance(file, expected_value.length);
+	return true;
+}
+
+template<typename T>
+bool _expect_read(string& file, T expected_value, const char* path, const char* error_msg) {
+	if (file.length < sizeof(T))
+		return false;
+	if (*(T*)file.data != expected_value) {
+		printf("'%s' %s expected '", path, error_msg);
+		print_value(expected_value);
+		printf("' got '");
+		print_value(*(T*)file.data);
+		printf("'\n");
+		return false;
+	}
+
+	advance(file, sizeof(T));
+	return true;
+}
+
+template<typename T, typename S>
+bool _expect(T value, S expected_value, const char* path, const char* error_msg) {
+	if (value != expected_value) {
+		printf("'%s' %s expected '", path, error_msg);
+		print_value(expected_value);
+		printf("' got '");
+		print_value(value);
+		printf("'\n");
+		return false;
+	}
+
+	return true;
+}
+
+#define expect_read(expected_value, error_msg) if(!_expect_read(file, expected_value, path, error_msg)) return{0, 0}; 
+#define expect(value, expected_value, error_msg) if(!_expect(value, expected_value, path, error_msg)) return{0, 0}; 
+
+ BMP_Texture load_bmp_file(const char *path) {
+	auto file = load_entire_file(path);
+	auto start_file = file;
+
+	if (!file.length) {
+		log_error("'%s'", path);
+		return{ 0, 0, 0 };
+	}
+
+	if (file.length < 54) {
+		log_error("'%s'", path);
+		return{ 0, 0, 0 };
+	}
+
+	expect_read("BM"_s, "Bitmap file corrupted");
+	advance(file, 4);
+	advance(file, 4);
+
+	auto pixel_start_byte = *(int32*)file.data;
+	advance(file, 4);
+
+	expect_read((uint32)sizeof(BITMAPINFOHEADER), "Bitmapinfoheader wrong size");
+
+	auto bitmap_header = *(BITMAPINFOHEADER*)(file.data - 4);
+	advance(file, sizeof(BITMAPINFOHEADER));
+
+	expect(bitmap_header.biPlanes, 1, "wrong number of Planes");
+
+	expect(bitmap_header.biBitCount, 32, "wrong bits per pixel");
+
+	expect(bitmap_header.biCompression, 0, "wrong compression");
+	
+	expect(bitmap_header.biClrUsed, 0, "no colortable expected");
+
+	expect(bitmap_header.biClrImportant, 0, "colors from colortable used");
+
+	advance(file, pixel_start_byte - (file.data - start_file.data));
+	
+	//expect(file.length, (bitmap_header.biWidth * bitmap_header.biHeight) * 4, "unexpected number of pixels");
+	
+	if (file.length < bitmap_header.biWidth * bitmap_header.biHeight * 4) {
+		log_error("unexpected number of pixels");
+		return{ 0, 0, 0 };
+	}
+
+
+	uint32 *pixel = (uint32*)malloc(bitmap_header.biWidth * bitmap_header.biHeight * 4);
+
+	if (!pixel) {
+		log_error("'%s' malloc failed", path);
+		return { 0, 0 };
+	}
+
+
+	for (int y = 0; y < bitmap_header.biHeight; y++) {
+		for (int x = 0; x < bitmap_header.biWidth; x++) {
+				pixel[bitmap_header.biWidth * (bitmap_header.biHeight - y - 1) + x] = ((uint32*)file.data)[bitmap_header.biWidth * y + x];
+		}
+	}
+
+
+	//memcpy(pixel, file.data, (bitmap_header.biWidth * bitmap_header.biHeight) * 4);
+
+	free(start_file.data);
+	return{ bitmap_header.biWidth, bitmap_header.biHeight, pixel };
+
+}
+
+
+#pragma pack(1)
+struct TGA_Color_Map_Info {
+	uint16 index;
+	uint16 length;
+	uint8 size;
+};
+
+#pragma pack(1)
+struct TGA_Image_Specification {
+	uint16 x_origin;
+	uint16 y_origin;
+	uint16 width;
+	uint16 height;
+	uint8 bits_per_pixel;
+	uint8 image_descriptor;
+};
+
+BMP_Texture load_tga_file(const char* path) {
+	auto file = load_entire_file(path);
+	auto start_file = file;
+
+	if (!file.length) {
+		log_error("'%s' failed to load", path);
+		return{ 0, 0, 0 };
+	}
+
+	auto id_length = read<uint8>(file);
+
+	auto color_map_type = read<uint8>(file);
+	expect(color_map_type, 0, "wrong color map type");
+
+	auto image_type = read<uint8>(file);
+	expect(image_type, 10, "wrong image type");
+
+	auto color_map_info = read<TGA_Color_Map_Info >(file);
+	expect(color_map_info.size, 0, "no existing color map");
+	
+	auto image_specification = read<TGA_Image_Specification>(file);
+	expect(image_specification.bits_per_pixel, 32, "not 32 bitsperpixel");
+	
+	auto descriptor_mask = 0x30;
+	auto image_origin = image_specification.image_descriptor & descriptor_mask; 
+	expect(image_origin, 32, "wrong image origin");
+
+	advance(file, id_length);
+
+	uint32* start_pixel = (uint32*)malloc(image_specification.width * image_specification.height * 4);
+	
+	uint32* pixel = start_pixel;
+
+
+	if (!start_pixel) {
+		log_error("'%s' malloc failed", path);
+		return { 0, 0 };
+	}
+
+	auto needed_pixel = image_specification.height * image_specification.width;
+
+	for (; needed_pixel;) {
+		auto type_and_repetition_count = read<uint8>(file);
+		auto repetition_count = type_and_repetition_count & 0x7F;
+		
+		if ((type_and_repetition_count & 0x80)) {
+			auto pixel_value = read<uint32>(file);
+			for (; repetition_count + 1; repetition_count--) {
+				*pixel = pixel_value;
+				pixel++;
+				needed_pixel--;
+			}
+		} else {
+			for (; repetition_count + 1; repetition_count--) {
+				auto pixel_value = read<uint32>(file);
+				*pixel = pixel_value;
+				pixel++;
+				needed_pixel--;
+			}
+		}
+	}
+
+	return { image_specification.width, image_specification.height, start_pixel };
+}
+
+
+BMP_Texture tex1 = load_tga_file("../Assets/strawberry.tga");
+//BMP_Texture tex1 = load_bmp_file("../Assets/strawberry.bmp");
+
+
+ void render_sprite(BMP_Texture sprite, int x_offset, int y_offset) {
+	 auto back_buffer = (Pixel *)BitmapMemory;
+	 for (int y = 0; y < sprite.bmp_height; y++) {
+		 for (int x = 0; x < sprite.bmp_width; x++) {
+			 if (x + x_offset < 0 || x + x_offset >= BitmapWidth) {
+				 continue;
+			 }
+			 if (y + y_offset < 0 || y + y_offset >= BitmapHeight) {
+				 continue;
+			 }
+
+			 auto color = (Pixel *)&sprite.pixel[sprite.bmp_width * y + x];
+			 auto red = color->red / 255.0f;
+			 auto green = color->green / 255.0f;
+			 auto blue = color->blue / 255.0f;
+
+			 //sqrt für gamma_korrektur
+			 red = square_root(red) * 255;
+			 green = square_root(green) * 255;
+			 blue = square_root(blue) * 255;
+
+			 back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].red = lerp(back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].red, color->alpha / 255.0f, red);
+			 back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].green = lerp(back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].green, color->alpha / 255.0f, green);
+			 back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].blue = lerp(back_buffer[(y_offset + y) * BitmapWidth + x_offset + x].blue, color->alpha / 255.0f, blue);
+			
+
+		 }
+	 }
+ }
+
 
 
 struct Quad {
@@ -209,7 +649,7 @@ void render_point(int p1_points, int p2_points) {
 
 void render_middle_line() {
 	for (float a = 0.02f; a <= 1;) {
-		renderQuad({ 0.5, a }, { 0.001, 0.01 }, { 1, 1, 1 });
+		renderQuad({ 0.5, a }, { 0.001, 0.01 }, { 1, 1, 1, 1 });
 		a = a + 0.08;
 	}
 }
@@ -299,7 +739,7 @@ V2 move_ball(V2 ball_pos, V2& ball_direction, float distance_to_travel) {
 	}
 	if (distance_min == distance_bottom) {
 		ball_direction.y = -fabs(ball_direction.y);
-		play_sound(&se_wall_pong_1);
+		play_sound(&se_wall_pong_2);
 	}
 	return move_ball(ball_pos, ball_direction, distance_to_travel - distance_min);
 }
@@ -364,11 +804,21 @@ void RenderPong() {
 	ball_size.y = ball_size.x * ratio;
 
 	memset(BitmapMemory, 0, BitmapWidth * BitmapHeight * BytesPerPixel);
+
 	render_middle_line();
 	render_point(p1_points, p2_points);
 	renderQuad(p1_pos, p1_size, p1_color);
 	renderQuad(p2_pos, p2_size, p2_color);
 	renderQuad(ball_pos, ball_size, ball_color);
+	
+	render_sprite(tex1, ball_pos.x * BitmapWidth - 0.5 * tex1.bmp_width * 10, ball_pos.y * BitmapHeight - 0.5 * tex1.bmp_height * 10);
+
+	renderQuad({ 0.4, 0.4 }, { 0.2, 0.2 }, { 1, 1 , 1, 1 });
+	renderQuad({ 0.3, 0.3 }, { 0.1, 0.1 }, { 1, 0 , 1, 1 });
+	renderQuad({ 0.5, 0.4 }, { 0.1, 0.1 }, { 1, 0 , 0, 1 });
+	renderQuad({ 0.5, 0.5 }, { 0.1, 0.1 }, { 0, 0 , 1, 0.5 });
+
+	//correct_gamma();
 }
 
 
@@ -468,18 +918,160 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 	return Result;
 }
 
+ID3D11Texture2D* create_texture2d(uint32 width, uint32 height, DXGI_FORMAT format, uint32 bindflags = D3D11_BIND_SHADER_RESOURCE, DXGI_SAMPLE_DESC sampledesc = { 1, 0 }, uint32 miplevels = 1, uint32 arraysize = 1, uint32 miscflags = 0, D3D11_USAGE usage = D3D11_USAGE_DEFAULT, uint32 cpuaccesflags = 0) {
+	D3D11_TEXTURE2D_DESC buffer_desc = {
+		.Width			= width,
+		.Height			= height,
+		.MipLevels		= miplevels,
+		.ArraySize		= arraysize,
+		.Format			= format,
+		.SampleDesc		= sampledesc,
+		.Usage			= usage,
+		.BindFlags		= bindflags,
+		.CPUAccessFlags = cpuaccesflags,
+		.MiscFlags		= miscflags,
+	};
+
+	ID3D11Texture2D* buffer;
+
+	if (device->CreateTexture2D(&buffer_desc, 0, &buffer)) {
+		log_error("CreateTexture2D() has failed");
+		return 0;
+	}
+
+	return buffer;
+}
+
 
 int main() {
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
 	init_sound();
-	play_sound(&se_pong_game);
+	//play_sound(&se_pong_game);
 
 	auto Window = (HWND)create_window(WindowMsgs);
 	if (!Window) {
+
 		printf("CreateWindow failed!\n");
 		return 1;
 	}
+
+	D3D_FEATURE_LEVEL feature_levels[] = { D3D_FEATURE_LEVEL_11_0 };
+
+	DXGI_RATIONAL refresh_rate = {
+		.Numerator = 60,
+		.Denominator = 1,
+	};
+
+	DXGI_MODE_DESC buffer_desc = {
+		.Width = render_width,
+		.Height = render_height,
+		.RefreshRate = refresh_rate,
+		.Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+		.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED,
+		.Scaling = DXGI_MODE_SCALING_UNSPECIFIED,
+	};
+
+	DXGI_SAMPLE_DESC sample_desc = {
+		.Count = 1,
+		.Quality = 0,
+	};
+
+	DXGI_SWAP_CHAIN_DESC swap_chain_desc = {
+		.BufferDesc = buffer_desc,
+		.SampleDesc = sample_desc,
+		.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+		.BufferCount = 2,
+		.OutputWindow = Window,
+		.Windowed = TRUE,
+		.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+		.Flags = 0,
+	};
 	
+	if (D3D11CreateDeviceAndSwapChain(0, D3D_DRIVER_TYPE_HARDWARE, 0, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, &swap_chain_desc, &swap_chain, &device, 0, &devicecontext)) {
+		log_error("D3D11CreateDeviceAndSwapChain has failed.");
+		return 1;
+	}
+
+	ID3D11Texture2D* present_buffer;
+	if (swap_chain->GetBuffer(0, IID_PPV_ARGS(&present_buffer))) {
+		log_error("PresentBuffer getting failed");
+		return 1;
+	}
+
+	ID3D11RenderTargetView* render_target_view;
+	if (device->CreateRenderTargetView(present_buffer, 0, &render_target_view)) {
+		log_error("CreateRenderTargetView has failed");
+		return 1;
+	}
+
+	present_buffer->Release();
+
+	ID3D11Texture2D* present_depth_stencil_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_D24_UNORM_S8_UINT, D3D11_BIND_DEPTH_STENCIL);
+	if (!present_depth_stencil_buffer)
+		return 1;
+
+	ID3D11DepthStencilView *present_depth_stencil_view;
+	if (device->CreateDepthStencilView(present_depth_stencil_buffer, 0, &present_depth_stencil_view)) {
+		log_error("CreateDepthStencilView has failed.");
+		return 1;
+	}
+
+	present_depth_stencil_buffer->Release();
+
+	ID3D11Texture2D* back_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET);
+	if (!back_buffer)
+		return 1;
+
+	ID3D11RenderTargetView* back_buffer_render_target_view;
+	if (device->CreateRenderTargetView(back_buffer, 0, &back_buffer_render_target_view)) {
+		log_error("CreateRenderTargetView has failed");
+		return 1;
+	}
+
+	back_buffer->Release();
+
+	ID3D11Texture2D* back_depth_stencil_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_D24_UNORM_S8_UINT, D3D11_BIND_DEPTH_STENCIL);
+	if (!back_depth_stencil_buffer)
+		return 1;
+
+	ID3D11DepthStencilView* back_buffer_depth_stencil_view;
+	if (device->CreateDepthStencilView(back_depth_stencil_buffer, 0, &back_buffer_depth_stencil_view)) {
+		log_error("CreateDepthStencilView has failed.");
+		return 1;
+	}
+
+	back_depth_stencil_buffer->Release();
+
+	D3D11_DEPTH_STENCIL_DESC depth_stencil_desc = {
+		.DepthEnable = TRUE,
+		.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL,
+		.DepthFunc = D3D11_COMPARISON_LESS,
+		.StencilEnable = FALSE,
+		.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK,
+		.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK,
+		.FrontFace = { 
+			.StencilFunc = D3D11_COMPARISON_ALWAYS,
+			.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP,
+			.StencilFailOp = D3D11_STENCIL_OP_KEEP,
+			.StencilPassOp = D3D11_STENCIL_OP_KEEP,
+		},
+		.BackFace = {
+			.StencilFunc = D3D11_COMPARISON_ALWAYS,
+			.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP,
+			.StencilFailOp = D3D11_STENCIL_OP_KEEP,
+			.StencilPassOp = D3D11_STENCIL_OP_KEEP,
+		},
+	};
+
+
+	if (device->CreateDepthStencilState(&depth_stencil_desc, &depth_stencil_state)) {
+		log_error("CreateDepthStencilState has failed.");
+		return 1;
+	}
+
+
+
+
 	MSG Message;
 	Running = true;
 
@@ -501,22 +1093,8 @@ int main() {
 			DispatchMessage(&Message);
 		}
 
-		//RenderGradient(XOffset, YOffset);
 		RenderPong();
 
-		/*double min_time = INFINITY;
-		double max_time = 0.0;
-		double avg_time = 0.0;
-
-		if (renderQuad_times_current == 0) {
-			for (auto t : renderQuad_times) {
-				min_time = min(min_time, t * 1000.0);
-				max_time = max(max_time, t * 1000.0);
-				avg_time += (t * 1000.0) / (double)renderQuad_times_num;
-			}
-			printf("renderQuad_times: %f %f %f\n", min_time, avg_time, max_time);
-		}
-		*/
 		Win32UpdateWindow(Context, Window, 0, 0);
 		
 		XOffset++;

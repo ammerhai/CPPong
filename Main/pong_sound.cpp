@@ -3,6 +3,7 @@
 #include <dsound.h>
 #include <mmreg.h>
 #include "log.h"
+#include <stdio.h>
 
 #include "pong_sound.h"
 
@@ -28,7 +29,137 @@ void play_sound(Sound_Effect* sound_effect) {
 	return;
 }
 
+#if 1
 
+#define print_value(v) _Generic((v), \
+	int8_t: printf("%hhd", v), \
+	int16_t: printf("%hd", v), \
+	int32_t: printf("%d", v),  \
+	int64_t: printf("%lld", v) \
+)
+
+bool _expect(string& file, string expected_value, const char* path, const char* error_msg) {
+	if (file.length < expected_value.length)
+		return false;
+	if (!(string{ expected_value.length, file.data } == expected_value)) {
+		log_error("'%s' %s expected '%.*s' got '%.*s'\n", path, error_msg, expected_value.length, expected_value.data, expected_value.length, file.data);
+		return false;
+	}
+	advance(file, expected_value.length);
+	return true;
+}
+ 
+template<typename T>
+bool _expect(string &file, T expected_value, const char *path, const char *error_msg) {
+	if (file.length < sizeof(T))
+		return false;
+	if (*(T*)file.data != expected_value) {
+		printf("'%s' %s expected '", path, error_msg);
+		print_value(expected_value);
+		printf("' got '");
+		print_value(*(T*)file.data);
+		printf("'\n");
+		return false;
+	}
+
+	advance(file, sizeof(T));
+	return true;
+}
+
+#define expect(expected_value, error_msg) if(!_expect(file, expected_value, path, error_msg)) return{0, 0}; 
+
+Sound_Effect load_sound_effect(const char* path) {
+	auto file = load_entire_file(path);
+	auto file_start = file;
+
+
+	if (!file.length) {
+		log_error("'%s' Datei konnte nicht geladen werden", path);
+		return { 0, 0 };
+	}
+
+	if (file.length < 36) {
+		log_error("'%s' Datei ist zu klein", path);
+		return { 0, 0 };
+	}
+
+	expect("RIFF"_s, "RIFF");
+
+	advance(file, 4);
+
+	expect("WAVE"_s, "WAVE header corrupted");
+
+	expect("fmt "_s, "fmt chunk corrupted");
+
+	expect((int32_t)16, "fmt Chunklength corrupted");
+
+	auto format = *(WAVEFORMATEX*)file.data;
+	advance(file, 16);
+
+	expect("data"_s, "data chunk corrupted");
+
+	auto data_length = *(int32_t*)file.data;
+	advance(file, 4);
+
+	if (!(format.nChannels == 1 || format.nChannels == 2)) {
+		log_error("'%s' Nicht unterstuetzte Channelanzahl, '1' oder '2' erwartet, '%hd' erhalten", path, format.nChannels);
+		return { 0, 0 };
+	}
+
+	if (format.wFormatTag != 1) {
+		log_error("'%s' Falscher Formattag, '1' erwartet, '%hd' erhalten (siehe Google)", path, format.wFormatTag);
+		return { 0, 0 };
+	}
+
+	if (format.nSamplesPerSec != 48000) {
+		log_error("'%s' Falsche SamplesProSekunde, '48000' erwartet, '%d' erhalten", path, format.nSamplesPerSec);
+		return { 0, 0 };
+	}
+
+	if (format.wBitsPerSample != 16) {
+		log_error("'%s' Falsche BitsProSample '16' erwartet, '%hd' erhalten", path, format.wBitsPerSample);
+		return { 0, 0 };
+	}
+
+	auto expected_block_align = format.wBitsPerSample / 8 * format.nChannels;
+
+	if (format.nBlockAlign != expected_block_align) {
+		log_error("'%s' Falscher BlockAlign '%d' erwartet, '%hd' erhalten", path, expected_block_align, format.nBlockAlign);
+		return { 0, 0 };
+	}
+
+	int64_t num_samples = data_length / (format.wBitsPerSample / 8);
+	if (format.nChannels == 2)
+		num_samples /= 2;
+
+	float* samples = (float*)malloc(num_samples * sizeof(float) * 2);
+
+	if (!samples) {
+		log_error("'%s' malloc failed", path);
+		return { 0, 0 };
+	}
+
+	if (format.nChannels == 1) {
+		for (int i = 0; i < num_samples; i++) {
+			samples[i * 2 + 0] = (*(int16_t*)file.data) / 32767.0f;
+			samples[i * 2 + 1] = (*(int16_t*)file.data) / 32767.0f;
+			advance(file, 2);
+		}
+	} else {
+		for (int i = 0; i < num_samples; i++) {
+			samples[i * 2 + 0] = (*(int16_t*)file.data) / 32767.0f;
+			advance(file, 2);
+			samples[i * 2 + 1] = (*(int16_t*)file.data) / 32767.0f;
+			advance(file, 2);
+		}
+	}
+
+	free(file_start.data);
+	return { num_samples, samples };
+}
+
+
+#else
 Sound_Effect load_sound_effect(const char* path) {
 	auto file = load_entire_file(path);
 	auto file_start = file;
@@ -64,7 +195,7 @@ Sound_Effect load_sound_effect(const char* path) {
 	advance(file, 4);
 
 	if ((*(int32_t*)file.data) != 16) {
-		log_error("'%s' fmt Chunklength korrumpiert '16' erwartet, '%.*s' erhalten", path, min(file.length, 4), file.data);
+		log_error("'%s' fmt Chunklength korrumpiert '16' erwartet, '%d' erhalten", path, *(int32_t *)file.data);
 		return { 0, 0 };
 	}
 	advance(file, 4);
@@ -137,7 +268,7 @@ Sound_Effect load_sound_effect(const char* path) {
 	free(file_start.data);
 	return { num_samples, samples };
 }
-
+#endif
 
 int SoundThread(void* arg) {
 	typedef HRESULT direct_sound_create(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN  pUnkOuter);

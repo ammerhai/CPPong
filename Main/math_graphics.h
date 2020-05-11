@@ -1,5 +1,7 @@
 #pragma once
 
+#include <emmintrin.h>
+#include <immintrin.h>
 #include <xmmintrin.h>
 #include <stdint.h>
 #include <assert.h>
@@ -45,7 +47,7 @@ constexpr inline double max(double a, double b) {
 	return a > b ? a : b;
 }
 
-constexpr inline double min(size_t a, int b) {
+constexpr inline int64_t min(int64_t a, int64_t b) {
 	return a < b ? a : b;
 }
 
@@ -53,6 +55,11 @@ template<typename T>
 constexpr inline T min(T a, T b) {
 	return a < b ? a : b;
 }
+
+constexpr float lerp(float a, float t, float b) {
+	return (1.0f - t) * a + t * b;
+}
+
 
 //-----------------------------------------------
 //Vektorberechnung 2-dim
@@ -631,4 +638,57 @@ inline M3x3 identityM3x3() {
 	};
 }
 
-//
+
+
+//-----------------------------------------------
+//m128i
+struct m128i {
+	__m128i val;
+};
+
+inline __m128i operator &(m128i a, m128i b) {
+	return _mm_and_si128(a.val, b.val);
+}
+
+inline __m128i operator |(m128i a, m128i b) {
+	return _mm_or_si128(a.val, b.val);
+}
+
+inline __m128i operator >>(m128i a, int b) {
+	return _mm_srli_epi32(a.val, b);
+}
+
+inline __m128i operator <<(m128i a, int b) {
+	return _mm_slli_epi32(a.val, b);
+}
+
+
+//-----------------------------------------------
+//m128
+struct m128 {
+	__m128 val;
+};
+
+inline __m128 operator +(m128 a, m128 b) {
+	return _mm_mul_ps(a.val, b.val);
+}
+
+inline __m128 operator *(m128 a, m128 b) {
+	return _mm_mul_ps(a.val, b.val);
+}
+
+inline __m128 operator *(float a, m128 b) {
+	return _mm_mul_ps(_mm_set1_ps(a), b.val);
+}
+
+inline __m128 square_root(__m128 a) {
+	return _mm_sqrt_ps(a);
+}
+
+inline __m128 operator /(m128 a, m128 b) {
+	return _mm_div_ps(a.val, b.val);
+}
+
+inline __m128 lerp(__m128 a, float t, float b) {
+	return (1.0f - t) * a + (t * b);
+}
