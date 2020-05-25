@@ -4,6 +4,7 @@
 //
 #include "math_graphics.h"
 #include <d3d11.h>
+#include <D3DCompiler.h>
 #include <Windows.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -77,7 +78,7 @@ int p2_points = 0;
 V2 ball_pos = { 0.5, 0.5 };
 V2 ball_size = { 0.005, 0.005 };
 V4 ball_color = {1, 0, 0, 1};
-float ball_speed = 0.0;
+float ball_speed = 0.5;
 V2 ball_direction = normalize(V2{-1, 0.9});
 
 //Gameplay Attribute
@@ -798,7 +799,6 @@ void UpdatePong() {
 }
 
 void RenderPong() {
-	UpdatePong();
 
 	float ratio = (float)BitmapWidth / (float)BitmapHeight;
 	ball_size.y = ball_size.x * ratio;
@@ -853,6 +853,8 @@ internal_function void Win32UpdateWindow(HDC Context, HWND Window, int X, int Y)
 	StretchDIBits(Context, 0, 0, WindowWidth, WindowHeight, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
+bool LoadShaders();
+
 LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 	LRESULT Result = 0;
 
@@ -884,6 +886,10 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 		case WM_KEYDOWN: {
 			if (!(lParam & (1 << 30))) {
 				key_down[wParam] = true;
+			}
+
+			if (wParam == VK_F5) {
+				LoadShaders();
 			}
 		} break;
 
@@ -942,8 +948,71 @@ ID3D11Texture2D* create_texture2d(uint32 width, uint32 height, DXGI_FORMAT forma
 	return buffer;
 }
 
+ID3D11VertexShader *vertex_shader;
+ID3D11InputLayout *input_layout;
+ID3DBlob *vertex_shader_code;
+ID3D11Buffer *vertex_buffer;
+
+ID3DBlob *pixel_shader_code;
+ID3D11PixelShader *pixel_shader;
+
+struct Vertex {
+	V4 pos;
+	V4 color;
+};
+
+Vertex vertices[] = {
+	{{ 0, .50, 0, 1 }, { 1, 0, 1, 1 } },
+	{{ .50, -.50, 0, 1 }, { 0, 1, 1, 1 } },
+	{{ -.50, -.50, 0, 1 }, { 1, 1, 0, 1 } },
+};
+
+uint32 vertex_size = sizeof(Vertex);
+uint32 offset;
+
+void RenderPongGPU() {
+
+	devicecontext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	devicecontext->IASetInputLayout(input_layout);
+	devicecontext->IASetVertexBuffers(0, 1, &vertex_buffer, &vertex_size, &offset);
+	devicecontext->VSSetShader(vertex_shader, 0, 0);
+	devicecontext->PSSetShader(pixel_shader, 0, 0);
+	devicecontext->Draw(3, 0);
+}
+
+bool LoadShaders() {
+
+	ID3DBlob* error_msgs = 0;
+	HRESULT error_code = 0;
+
+	if (error_code = D3DCompileFromFile(L"../Assets/Shader/basic_vertex_shader.hlsl", 0, 0, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0, 0, &vertex_shader_code, &error_msgs)) {
+		log("CompileFromFile has failed");
+		if(error_msgs)
+			log_error("%.*s", error_msgs->GetBufferSize(), error_msgs->GetBufferPointer());
+		return false;
+	}
+
+	if (device->CreateVertexShader(vertex_shader_code->GetBufferPointer(), vertex_shader_code->GetBufferSize(), 0, &vertex_shader)) {
+		log_error("CreateVertexShader has failed");
+		return false;
+	}
+
+	if (error_code = D3DCompileFromFile(L"../Assets/Shader/basic_pixel_shader.hlsl", 0, 0, "main", "ps_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0, 0, &pixel_shader_code, &error_msgs)) {
+		log("CompileFromFile has failed");
+		if (error_msgs)
+			log_error("%.*s", error_msgs->GetBufferSize(), error_msgs->GetBufferPointer());
+		return false;
+	}
+
+	if (device->CreatePixelShader(pixel_shader_code->GetBufferPointer(), pixel_shader_code->GetBufferSize(), 0, &pixel_shader)) {
+		log_error("CreateVertexShader has failed");
+		return false;
+	}
+	return true;
+}
 
 int main() {
+	CoInitializeEx(0, COINIT_APARTMENTTHREADED);
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
 	init_sound();
 	//play_sound(&se_pong_game);
@@ -1069,7 +1138,51 @@ int main() {
 		return 1;
 	}
 
+	if (!LoadShaders()) {
+		log_error("LoadShaders has failed");
+		return 1;
+	}
+	//device->CreateVertexShader()
 
+	D3D11_INPUT_ELEMENT_DESC input_element_desc[] = { 
+		{ "VERTEX_POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "VERTEX_COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+	};
+
+	if (device->CreateInputLayout(input_element_desc, 2, vertex_shader_code->GetBufferPointer(), vertex_shader_code->GetBufferSize(), &input_layout)) {
+		log_error("CreateInputLayout has failed");
+		return 1;
+	}
+
+	D3D11_VIEWPORT viewport = {
+		.TopLeftX = 0,
+		.TopLeftY = 0,
+		.Width = (float)render_width,
+		.Height = (float)render_height,
+		.MinDepth = 0,
+		.MaxDepth = 1,
+	};
+	devicecontext->RSSetViewports(1, &viewport);
+
+	D3D11_BUFFER_DESC vertex_buffer_desc = {
+		.ByteWidth = sizeof(vertices),
+		.Usage = D3D11_USAGE_DYNAMIC,
+		.BindFlags = D3D11_BIND_VERTEX_BUFFER,
+		.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
+		.MiscFlags = 0,
+		.StructureByteStride = 0,
+	};
+
+	D3D11_SUBRESOURCE_DATA subresource_data = {
+		.pSysMem = vertices,
+		.SysMemPitch = 0,
+		.SysMemSlicePitch = 0,
+	};
+
+	if (device->CreateBuffer(&vertex_buffer_desc, &subresource_data, &vertex_buffer)) {
+		log_error("Create Buffer has failed");
+		return 1;
+	}
 
 
 	MSG Message;
@@ -1093,9 +1206,17 @@ int main() {
 			DispatchMessage(&Message);
 		}
 
-		RenderPong();
+		UpdatePong(); 
 
-		Win32UpdateWindow(Context, Window, 0, 0);
+		devicecontext->OMSetRenderTargets(1, &render_target_view, present_depth_stencil_view);
+		V4 clear_color = { 0, 0, 0, 1 }; 
+		devicecontext->ClearRenderTargetView(render_target_view, clear_color.E);
+		devicecontext->ClearDepthStencilView(present_depth_stencil_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+		//RenderPong();
+		RenderPongGPU();
+
+		//Win32UpdateWindow(Context, Window, 0, 0);
+		swap_chain->Present(0, 0);
 		
 		XOffset++;
 	}

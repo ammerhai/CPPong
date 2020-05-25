@@ -1,3 +1,9 @@
-﻿Main.cpp(100,14): warning : missing '(' after '#pragma pack' - ignoring [-Wignored-pragmas]
-Main.cpp(1050,4): warning : unused typedef 'D3D11_DEPTH_STENCILOP_DESC' [-Wunused-local-typedef]
+﻿Main.cpp(101,14): warning : missing '(' after '#pragma pack' - ignoring [-Wignored-pragmas]
+Main.cpp(988,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(988,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(988,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1000,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(1000,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(1000,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(847,24): warning : unused function 'Win32UpdateWindow' [-Wunused-function]
   Main.vcxproj -> C:\Users\mikeb\Code\source\repos\Pong\x64\Debug\Main.exe
