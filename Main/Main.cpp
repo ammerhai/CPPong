@@ -76,7 +76,7 @@ int p2_points = 0;
 
 //Ball Attribute
 V2 ball_pos = { 0.5, 0.5 };
-V2 ball_size = { 0.005, 0.005 };
+V2 ball_size = { 0.0125, 0.0125 };
 V4 ball_color = {1, 0, 0, 1};
 float ball_speed = 0.5;
 V2 ball_direction = normalize(V2{-1, 0.9});
@@ -704,10 +704,10 @@ V2 move_ball(V2 ball_pos, V2& ball_direction, float distance_to_travel) {
 	if (distance_to_travel == 0)
 		return ball_pos;
 
-	auto p1 = Minkowski_sum(p1_pos, p1_size, ball_size);
-	auto p2 = Minkowski_sum(p2_pos, p2_size, ball_size);
-	auto wall_top = Minkowski_sum({ 0.5, 0 }, { 1, 0 }, ball_size);
-	auto wall_bottom = Minkowski_sum({ 0.5, 1 }, { 1, 0 }, ball_size);
+	auto p1 = Minkowski_sum(p1_pos, p1_size * 0.5, ball_size * 0.5);
+	auto p2 = Minkowski_sum(p2_pos, p2_size * 0.5, ball_size * 0.5);
+	auto wall_top = Minkowski_sum({ 0.5, 0 }, { 0.5, 0 }, ball_size * 0.5);
+	auto wall_bottom = Minkowski_sum({ 0.5, 1 }, { 0.5, 0 }, ball_size * 0.5);
 
 	float distance_top = clamp(0, Minkowski_intersects_ray(wall_top, ball_pos, ball_direction), INFINITY);
 	float distance_bottom = clamp(0, Minkowski_intersects_ray(wall_bottom, ball_pos, ball_direction), INFINITY);
@@ -758,21 +758,21 @@ void UpdatePong() {
 	//Steuerung Spieler 1
 	if (key_down['W']) {
 		p1_pos.y = p1_pos.y - player_speed * delta_time;
-		p1_pos = clamp01(p1_pos - p1_size - border) + p1_size + border;
+		p1_pos = clamp01(p1_pos - p1_size * 0.5 - border) + p1_size * 0.5 + border;
 	}
 	if (key_down['S']) {
 		p1_pos.y = p1_pos.y + player_speed * delta_time;
-		p1_pos = clamp01(p1_pos + p1_size + border) - p1_size - border;
+		p1_pos = clamp01(p1_pos + p1_size * 0.5 + border) - p1_size * 0.5 - border;
 	}
 
 	//Steuerung Spieler 2
 	if (key_down[VK_UP]) {
 		p2_pos.y = p2_pos.y - player_speed * delta_time;
-		p2_pos = clamp01(p2_pos - p2_size - border) + p2_size + border;
+		p2_pos = clamp01(p2_pos - p2_size * 0.5 - border) + p2_size * 0.5 + border;
 	}
 	if (key_down[VK_DOWN]) {
 		p2_pos.y = p2_pos.y + player_speed * delta_time;
-		p2_pos = clamp01(p2_pos + p2_size + border) - p2_size - border;
+		p2_pos = clamp01(p2_pos + p2_size * 0.5 + border) - p2_size * 0.5 - border;
 	}
 
 	float distance_traveled = ball_speed * delta_time;
@@ -924,6 +924,13 @@ LRESULT WindowMsgs(HWND Window, UINT Message, WPARAM wParam, LPARAM lParam) {
 	return Result;
 }
 
+void DX11SetDebugName(ID3D11DeviceChild *child, string name) {
+#ifdef _DEBUG
+	if (child && name.data)
+		child->SetPrivateData(WKPDID_D3DDebugObjectName, name.length, name.data);
+#endif
+}
+
 ID3D11Texture2D* create_texture2d(uint32 width, uint32 height, DXGI_FORMAT format, uint32 bindflags = D3D11_BIND_SHADER_RESOURCE, DXGI_SAMPLE_DESC sampledesc = { 1, 0 }, uint32 miplevels = 1, uint32 arraysize = 1, uint32 miscflags = 0, D3D11_USAGE usage = D3D11_USAGE_DEFAULT, uint32 cpuaccesflags = 0) {
 	D3D11_TEXTURE2D_DESC buffer_desc = {
 		.Width			= width,
@@ -948,36 +955,109 @@ ID3D11Texture2D* create_texture2d(uint32 width, uint32 height, DXGI_FORMAT forma
 	return buffer;
 }
 
-ID3D11VertexShader *vertex_shader;
 ID3D11InputLayout *input_layout;
-ID3DBlob *vertex_shader_code;
 ID3D11Buffer *vertex_buffer;
+ID3D11Buffer *index_buffer;
+ID3D11Buffer *instance_buffer;
+
+ID3DBlob* vertex_shader_code;
+ID3D11VertexShader* vertex_shader;
+
+ID3DBlob* sinus_vertex_shader_code;
+ID3D11VertexShader* sinus_vertex_shader;
 
 ID3DBlob *pixel_shader_code;
 ID3D11PixelShader *pixel_shader;
 
+ID3DBlob* sinus_pixel_shader_code;
+ID3D11PixelShader* sinus_pixel_shader;
+
 struct Vertex {
 	V4 pos;
-	V4 color;
 };
 
 Vertex vertices[] = {
-	{{ 0, .50, 0, 1 }, { 1, 0, 1, 1 } },
-	{{ .50, -.50, 0, 1 }, { 0, 1, 1, 1 } },
-	{{ -.50, -.50, 0, 1 }, { 1, 1, 0, 1 } },
+	{{ -1, 1, 1, 1 } },
+	{{ 1, -1, 1, 1 } },
+	{{ -1, -1, 1, 1 } },
+	{{ 1, 1, 1, 1 } },
 };
 
-uint32 vertex_size = sizeof(Vertex);
-uint32 offset;
+uint16 indices[] = {
+	0, 1, 2,
+	0, 3, 1,
+};
+
+enum Quad_Indices {
+	Ball,
+	Player1,
+	Player2,
+
+	NUM_Quad_Indices
+};
+
+struct Instance {
+	V4 pos_size;
+	V4 left_color;
+	V4 right_color;
+};
+
+Instance instances[NUM_Quad_Indices] = {
+};
+
 
 void RenderPongGPU() {
+	float ratio = (float)BitmapWidth / (float)BitmapHeight;
+	ball_size.y = ball_size.x * ratio;
+
+	instances[Ball].pos_size    = { ball_pos, ball_size };
+	instances[Player1].pos_size = { p1_pos, p1_size };
+	instances[Player2].pos_size = { p2_pos, p2_size };
+
+	instances[Ball].left_color  = { 1, 1, 0, 1 };
+	instances[Ball].right_color = { 1, 0, 1, 1 };
+
+	instances[Player1].left_color  = { 1, 0, 0, 1 };
+	instances[Player1].right_color = { 1, 0, 0, 1 };
+	instances[Player2].left_color  = { 0, 1, 0, 1 };
+	instances[Player2].right_color = { 0, 1, 0, 1 };
+
+	D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+	devicecontext->Map(instance_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
+	memcpy(mapped_subresource.pData, instances, sizeof(instances));
+	devicecontext->Unmap(instance_buffer, 0);
 
 	devicecontext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	devicecontext->IASetInputLayout(0);
+
+	ID3D11Buffer *input_buffers[] = {
+		vertex_buffer,
+		instance_buffer,
+	};
+
+	UINT input_strides[] = {
+		sizeof(Vertex),
+		sizeof(Instance),
+	};
+
+	UINT input_offsets[] = {
+		0,
+		0,
+	};
+
+	devicecontext->IASetVertexBuffers(0, sizeof(input_buffers) / sizeof(*input_buffers), input_buffers, input_strides, input_offsets);
+	devicecontext->IASetIndexBuffer(index_buffer, DXGI_FORMAT_R16_UINT, 0);
+
+	devicecontext->VSSetShader(sinus_vertex_shader, 0, 0);
+	devicecontext->PSSetShader(sinus_pixel_shader, 0, 0);
+	devicecontext->DrawIndexedInstanced(6, 1, 0, 0, 0);
+
 	devicecontext->IASetInputLayout(input_layout);
-	devicecontext->IASetVertexBuffers(0, 1, &vertex_buffer, &vertex_size, &offset);
 	devicecontext->VSSetShader(vertex_shader, 0, 0);
 	devicecontext->PSSetShader(pixel_shader, 0, 0);
-	devicecontext->Draw(3, 0);
+	devicecontext->DrawIndexedInstanced(6, NUM_Quad_Indices, 0, 0, 0);
+
+	
 }
 
 bool LoadShaders() {
@@ -985,7 +1065,7 @@ bool LoadShaders() {
 	ID3DBlob* error_msgs = 0;
 	HRESULT error_code = 0;
 
-	if (error_code = D3DCompileFromFile(L"../Assets/Shader/basic_vertex_shader.hlsl", 0, 0, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0, 0, &vertex_shader_code, &error_msgs)) {
+	if (error_code = D3DCompileFromFile(L"../Assets/Shader/basic_vertex_shader.hlsl", 0, 0, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0 | D3DCOMPILE_SKIP_OPTIMIZATION, 0, &vertex_shader_code, &error_msgs)) {
 		log("CompileFromFile has failed");
 		if(error_msgs)
 			log_error("%.*s", error_msgs->GetBufferSize(), error_msgs->GetBufferPointer());
@@ -993,6 +1073,18 @@ bool LoadShaders() {
 	}
 
 	if (device->CreateVertexShader(vertex_shader_code->GetBufferPointer(), vertex_shader_code->GetBufferSize(), 0, &vertex_shader)) {
+		log_error("CreateVertexShader has failed");
+		return false;
+	}
+
+	if (error_code = D3DCompileFromFile(L"../Assets/Shader/sinus_vertex_shader.hlsl", 0, 0, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0 | D3DCOMPILE_SKIP_OPTIMIZATION, 0, &sinus_vertex_shader_code, &error_msgs)) {
+		log("CompileFromFile has failed");
+		if (error_msgs)
+			log_error("%.*s", error_msgs->GetBufferSize(), error_msgs->GetBufferPointer());
+		return false;
+	}
+
+	if (device->CreateVertexShader(sinus_vertex_shader_code->GetBufferPointer(), sinus_vertex_shader_code->GetBufferSize(), 0, &sinus_vertex_shader)) {
 		log_error("CreateVertexShader has failed");
 		return false;
 	}
@@ -1005,16 +1097,57 @@ bool LoadShaders() {
 	}
 
 	if (device->CreatePixelShader(pixel_shader_code->GetBufferPointer(), pixel_shader_code->GetBufferSize(), 0, &pixel_shader)) {
-		log_error("CreateVertexShader has failed");
+		log_error("CreatePixelShader has failed");
+		return false;
+	}
+
+	if (error_code = D3DCompileFromFile(L"../Assets/Shader/sinus_pixel_shader.hlsl", 0, 0, "main", "ps_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL0, 0, &sinus_pixel_shader_code, &error_msgs)) {
+		log("CompileFromFile has failed");
+		if (error_msgs)
+			log_error("%.*s", error_msgs->GetBufferSize(), error_msgs->GetBufferPointer());
+		return false;
+	}
+
+	if (device->CreatePixelShader(sinus_pixel_shader_code->GetBufferPointer(), sinus_pixel_shader_code->GetBufferSize(), 0, &sinus_pixel_shader)) {
+		log_error("CreatePixelShader has failed");
 		return false;
 	}
 	return true;
 }
 
+
+ID3D11Buffer* CreateBuffer(string name, uint32 num_bytes, void* data = 0, uint32 BindFlags = D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE Usage = D3D11_USAGE_DEFAULT, uint32 CPUAccessFlags = 0, uint32 MiscFlags = 0, uint32 StructureByteStride = 0, uint32 SysMemPitch = 0, uint32 SysMemSlicePitch = 0) {
+	D3D11_BUFFER_DESC buffer_desc = {
+		.ByteWidth = num_bytes,
+		.Usage = Usage,
+		.BindFlags = BindFlags,
+		.CPUAccessFlags = CPUAccessFlags,
+		.MiscFlags = MiscFlags,
+		.StructureByteStride = StructureByteStride,
+	};
+
+	D3D11_SUBRESOURCE_DATA subresource_data = {
+		.pSysMem = data,
+		.SysMemPitch = SysMemPitch,
+		.SysMemSlicePitch = SysMemSlicePitch,
+	};
+	
+	ID3D11Buffer* buffer;
+	if (device->CreateBuffer(&buffer_desc, &subresource_data, &buffer)) {
+		return 0;
+	}
+	DX11SetDebugName(buffer, name);
+
+	return buffer;
+}
+
+
+
 int main() {
 	CoInitializeEx(0, COINIT_APARTMENTTHREADED);
 	//MessageBoxA(0, "Hello World", "Hi", MB_OKCANCEL | MB_ICONERROR); //"0x11" (macro) as bitflags is possible too
 	init_sound();
+	//pong music while normal game mode has to be reactivated if needed
 	//play_sound(&se_pong_game);
 
 	auto Window = (HWND)create_window(WindowMsgs);
@@ -1075,44 +1208,8 @@ int main() {
 
 	present_buffer->Release();
 
-	ID3D11Texture2D* present_depth_stencil_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_D24_UNORM_S8_UINT, D3D11_BIND_DEPTH_STENCIL);
-	if (!present_depth_stencil_buffer)
-		return 1;
-
-	ID3D11DepthStencilView *present_depth_stencil_view;
-	if (device->CreateDepthStencilView(present_depth_stencil_buffer, 0, &present_depth_stencil_view)) {
-		log_error("CreateDepthStencilView has failed.");
-		return 1;
-	}
-
-	present_depth_stencil_buffer->Release();
-
-	ID3D11Texture2D* back_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET);
-	if (!back_buffer)
-		return 1;
-
-	ID3D11RenderTargetView* back_buffer_render_target_view;
-	if (device->CreateRenderTargetView(back_buffer, 0, &back_buffer_render_target_view)) {
-		log_error("CreateRenderTargetView has failed");
-		return 1;
-	}
-
-	back_buffer->Release();
-
-	ID3D11Texture2D* back_depth_stencil_buffer = create_texture2d(render_width, render_height, DXGI_FORMAT_D24_UNORM_S8_UINT, D3D11_BIND_DEPTH_STENCIL);
-	if (!back_depth_stencil_buffer)
-		return 1;
-
-	ID3D11DepthStencilView* back_buffer_depth_stencil_view;
-	if (device->CreateDepthStencilView(back_depth_stencil_buffer, 0, &back_buffer_depth_stencil_view)) {
-		log_error("CreateDepthStencilView has failed.");
-		return 1;
-	}
-
-	back_depth_stencil_buffer->Release();
-
 	D3D11_DEPTH_STENCIL_DESC depth_stencil_desc = {
-		.DepthEnable = TRUE,
+		.DepthEnable = FALSE,
 		.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL,
 		.DepthFunc = D3D11_COMPARISON_LESS,
 		.StencilEnable = FALSE,
@@ -1146,10 +1243,12 @@ int main() {
 
 	D3D11_INPUT_ELEMENT_DESC input_element_desc[] = { 
 		{ "VERTEX_POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "VERTEX_COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		{ "INSTANCE_POSITION_SIZE", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+		{ "LEFT_COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },		
+		{ "RIGHT_COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
 	};
 
-	if (device->CreateInputLayout(input_element_desc, 2, vertex_shader_code->GetBufferPointer(), vertex_shader_code->GetBufferSize(), &input_layout)) {
+	if (device->CreateInputLayout(input_element_desc, sizeof(input_element_desc) / sizeof(*input_element_desc), vertex_shader_code->GetBufferPointer(), vertex_shader_code->GetBufferSize(), &input_layout)) {
 		log_error("CreateInputLayout has failed");
 		return 1;
 	}
@@ -1164,26 +1263,9 @@ int main() {
 	};
 	devicecontext->RSSetViewports(1, &viewport);
 
-	D3D11_BUFFER_DESC vertex_buffer_desc = {
-		.ByteWidth = sizeof(vertices),
-		.Usage = D3D11_USAGE_DYNAMIC,
-		.BindFlags = D3D11_BIND_VERTEX_BUFFER,
-		.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
-		.MiscFlags = 0,
-		.StructureByteStride = 0,
-	};
-
-	D3D11_SUBRESOURCE_DATA subresource_data = {
-		.pSysMem = vertices,
-		.SysMemPitch = 0,
-		.SysMemSlicePitch = 0,
-	};
-
-	if (device->CreateBuffer(&vertex_buffer_desc, &subresource_data, &vertex_buffer)) {
-		log_error("Create Buffer has failed");
-		return 1;
-	}
-
+	vertex_buffer = CreateBuffer("vertex_buffer", sizeof(vertices), vertices, D3D11_BIND_VERTEX_BUFFER);
+	index_buffer = CreateBuffer("index_buffer", sizeof(indices), indices, D3D11_BIND_INDEX_BUFFER);
+	instance_buffer = CreateBuffer("instance_buffer", sizeof(instances), instances, D3D11_BIND_VERTEX_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
 
 	MSG Message;
 	Running = true;
@@ -1208,10 +1290,9 @@ int main() {
 
 		UpdatePong(); 
 
-		devicecontext->OMSetRenderTargets(1, &render_target_view, present_depth_stencil_view);
+		devicecontext->OMSetRenderTargets(1, &render_target_view, 0);
 		V4 clear_color = { 0, 0, 0, 1 }; 
 		devicecontext->ClearRenderTargetView(render_target_view, clear_color.E);
-		devicecontext->ClearDepthStencilView(present_depth_stencil_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 		//RenderPong();
 		RenderPongGPU();
 

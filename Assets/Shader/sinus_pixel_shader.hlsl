@@ -1,6 +1,5 @@
 struct PixelShaderInput {
 	float4 pos : SV_POSITION;
-	float4 color : COLOR;
 };
 
 struct PixelShaderOutput {
@@ -9,10 +8,14 @@ struct PixelShaderOutput {
 
 PixelShaderOutput main(PixelShaderInput input) {
 	PixelShaderOutput output;
-#if 1
-	output.color = input.color;
-#else
-	output.color = float4(1, 0, 1, 1);
-#endif
+
+	float sinus = sin(19 * ((input.pos.y / 1080.0f) * 6.283185f) + 0.5f * 3.141564f);
+
+	output.color = float4(0, 0, 0, 0);
+	if (sinus < 0) {
+		output.color = float4(1, 1, 1, 1);
+	}
+
+
 	return output;
 }

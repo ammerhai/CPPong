@@ -415,6 +415,11 @@ union V4 {
 		float E[4];
 	};
 
+	V4(V2 a, V2 b) { xy = a; zw = b; }
+	V4(float a, float b, float c, float d) { x = a; y = b; z = c; w = d; }
+	V4(float a, float b, float c) { x = a; y = b; z = c; w = 1; }
+	V4() {}
+
 	float operator [](size_t index) {
 		assert(index < 4);
 		return  E[index];
