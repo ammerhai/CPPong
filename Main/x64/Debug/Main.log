@@ -1,9 +1,23 @@
 ﻿Main.cpp(101,14): warning : missing '(' after '#pragma pack' - ignoring [-Wignored-pragmas]
-Main.cpp(988,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
-Main.cpp(988,17): message : place parentheses around the assignment to silence this warning
-Main.cpp(988,17): message : use '==' to turn this assignment into an equality comparison
-Main.cpp(1000,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
-Main.cpp(1000,17): message : place parentheses around the assignment to silence this warning
-Main.cpp(1000,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1068,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(1068,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(1068,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1080,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(1080,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(1080,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1092,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(1092,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(1092,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1104,17): warning : using the result of an assignment as a condition without parentheses [-Wparentheses]
+Main.cpp(1104,17): message : place parentheses around the assignment to silence this warning
+Main.cpp(1104,17): message : use '==' to turn this assignment into an equality comparison
+Main.cpp(1220,4): warning : ISO C++ requires field designators to be specified in declaration order; field 'StencilFunc' will be initialized after field 'StencilDepthFailOp' [-Wreorder-init-list]
+Main.cpp(1219,19): message : previous initialization for field 'StencilFunc' is here
+Main.cpp(1221,4): warning : ISO C++ requires field designators to be specified in declaration order; field 'StencilDepthFailOp' will be initialized after field 'StencilFailOp' [-Wreorder-init-list]
+Main.cpp(1220,26): message : previous initialization for field 'StencilDepthFailOp' is here
+Main.cpp(1226,4): warning : ISO C++ requires field designators to be specified in declaration order; field 'StencilFunc' will be initialized after field 'StencilDepthFailOp' [-Wreorder-init-list]
+Main.cpp(1225,19): message : previous initialization for field 'StencilFunc' is here
+Main.cpp(1227,4): warning : ISO C++ requires field designators to be specified in declaration order; field 'StencilDepthFailOp' will be initialized after field 'StencilFailOp' [-Wreorder-init-list]
+Main.cpp(1226,26): message : previous initialization for field 'StencilDepthFailOp' is here
 Main.cpp(847,24): warning : unused function 'Win32UpdateWindow' [-Wunused-function]
   Main.vcxproj -> C:\Users\mikeb\Code\source\repos\Pong\x64\Debug\Main.exe
